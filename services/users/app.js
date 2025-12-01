@@ -1,18 +1,10 @@
-const express = require('express');
+const express = require("express");
 const app = express();
-const port = process.env.PORT || 3000;
 
 app.use(express.json());
 
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'users' });
+app.get("/list", (req, res) => {
+  res.json({ users: ["Ana", "Luis", "Carlos"] });
 });
 
-app.post('/register', (req, res) => {
-  console.log('register request', req.body);
-  res.json({ registered: true, received: req.body });
-});
-
-app.listen(port, () => {
-  console.log(`Users service listening on ${port}`);
-});
+app.listen(3000, () => console.log("Users service running on 3000"));
