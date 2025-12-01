@@ -13,3 +13,18 @@ build/
 **/node_modules
 **/dist
 **/*.stackdump
+# npm / lockfiles
+package-lock.json
+yarn.lock
+
+# workspace artifacts
+/node_modules/
+/lambdas/*/dist/
+/infra/dist/
+
+# OS/editor
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
