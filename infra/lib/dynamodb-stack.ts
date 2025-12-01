@@ -1,16 +1,17 @@
-import { Stack, StackProps } from "aws-cdk-lib";
+import { Stack, StackProps, RemovalPolicy } from "aws-cdk-lib";
 import { Construct } from "constructs";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 
-export class DynamoDBStack extends Stack {
-  public readonly serviceTable: dynamodb.Table;
+export class DynamoDbStack extends Stack {
+  public readonly serviceRegistry: dynamodb.Table;
 
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
-    this.serviceTable = new dynamodb.Table(this, "ServiceRegistry", {
+    this.serviceRegistry = new dynamodb.Table(this, "ServiceRegistry", {
       partitionKey: { name: "serviceName", type: dynamodb.AttributeType.STRING },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: RemovalPolicy.DESTROY,
     });
   }
 }
