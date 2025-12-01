@@ -1,0 +1,15 @@
+node_modules/
+dist/
+build/
+.env
+*.log
+.env.local
+*.tgz
+.vscode/
+.DS_Store
+.terraform/
+.aws-sam/
+*.zip
+**/node_modules
+**/dist
+**/*.stackdump
