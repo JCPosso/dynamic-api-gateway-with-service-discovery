@@ -11,11 +11,19 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
 
-    "rootDir": "./infra",
-    "outDir": "./infra/cdk-out",
+    "baseUrl": ".",
+    "paths": {
+      "@infra/*": ["infra/*"],
+      "@lambdas/*": ["lambdas/*"],
+      "@services/*": ["services/*"]
+    },
+
+    "rootDir": ".",
+    "outDir": "dist",
 
     "types": ["node"]
   },
-  "include": ["infra/**/*.ts"],
-  "exclude": ["node_modules", "**/*.js"]
+
+  "include": ["infra/**/*.ts", "lambdas/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
 }
