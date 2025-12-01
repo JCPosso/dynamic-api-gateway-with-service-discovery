@@ -70,11 +70,11 @@ AWS
     - Dockerfile
     - app.js
 - /router                     # Lambda Router (JS/TS)
-  - index.js
-  - package.json
-- /sync                       # Lambda Sync (JS/TS)
-  - index.js
-  - package.json
+ - /lambdas                   # Lambdas (Router + Sync)
+  - /router
+    - index.ts
+  - /sync
+    - index.ts
 - /docs/screenshots           # Imágenes para README
 - README.md
 
@@ -85,11 +85,17 @@ AWS
 4.1 Preparación del entorno local
 ```bash
 git clone <url-del-repo>
-cd api-gateway-dynamic
-# instalar dependencias
-cd infra && npm install
-cd ../router && npm install
-cd ../sync && npm install
+cd api-gateway-dynamic-with-service-discovery
+# Usamos un único `package.json` raíz con workspaces (infra, services/*, lambdas/*)
+# Instala dependencias y enlaza workspaces
+npm install
+
+# Para desarrollo con recarga en una lambda concreta:
+npm --workspace=lambdas/router run dev
+npm --workspace=lambdas/sync run dev
+
+# Construir (CDK) e infra desde la workspace correspondiente:
+cd infra && npm run build
 ```
 ![](./docs/screenshots/01-install.png)
 

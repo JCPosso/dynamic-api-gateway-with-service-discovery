@@ -1,20 +1,36 @@
 {
-  "name": "dynamic-api-gateway",
-  "version": "0.1.0",
+  "name": "api-gateway-autoconfigurable",
+  "version": "1.0.0",
+  "description": "Prototipo de API Gateway Auto-Configurable con Service Discovery en ECS usando AWS CDK.",
   "private": true,
-  "workspaces": [
-    "infra",
-    "services/*",
-    "lambdas/*"
-  ],
   "scripts": {
-    "bootstrap": "npm install",
-    "install:all": "npm install",
-    "build:infra": "npm --workspace=infra run build",
-    "build:lambdas": "npm --workspace=lambdas/router run build || true && npm --workspace=lambdas/sync run build || true",
-    "build": "npm run build:infra && npm run build:lambdas",
-    "start:users": "npm --workspace=services/users start",
-    "start:orders": "npm --workspace=services/orders start"
+    "build": "tsc -p tsconfig.json && echo 'Lambdas JS no requieren build'",
+    "watch": "tsc -p tsconfig.json -w",
+    "cdk": "cdk",
+    "bootstrap": "cdk bootstrap",
+    "deploy": "cdk deploy --all",
+    "destroy": "cdk destroy --all",
+    "synth": "cdk synth",
+    "lint": "eslint . --ext .ts,.js",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.540.0",
+    "@aws-sdk/lib-dynamodb": "^3.540.0",
+    "aws-lambda": "^1.0.7",
+    "dotenv": "^16.4.0",
+    "jsonwebtoken": "^9.0.2",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "aws-cdk": "2.151.0",
+    "typescript": "^5.6.3",
+    "@types/aws-lambda": "^8.10.131",
+    "@types/node": "^20.11.30",
+    "@types/jsonwebtoken": "^9.0.6",
+    "ts-node": "^10.9.2",
+    "eslint": "^8.56.0",
+    "prettier": "^3.2.5"
   },
   "engines": {
     "node": ">=18"
