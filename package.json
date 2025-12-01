@@ -1,0 +1,22 @@
+{
+  "name": "dynamic-api-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "infra",
+    "services/*",
+    "lambdas/*"
+  ],
+  "scripts": {
+    "bootstrap": "npm install",
+    "install:all": "npm install",
+    "build:infra": "npm --workspace=infra run build",
+    "build:lambdas": "npm --workspace=lambdas/router run build || true && npm --workspace=lambdas/sync run build || true",
+    "build": "npm run build:infra && npm run build:lambdas",
+    "start:users": "npm --workspace=services/users start",
+    "start:orders": "npm --workspace=services/orders start"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

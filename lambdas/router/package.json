@@ -1,0 +1,28 @@
+{
+  "name": "lambda-router",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p .",
+    "dev": "ts-node-dev --respawn --transpile-only index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.940.0",
+    "@aws-sdk/util-dynamodb": "^3.940.0",
+    "@aws-sdk/client-ecs": "^3.940.0",
+    "undici": "^5.13.0",
+    "jsonwebtoken": "^8.5.1"
+  },
+  "devDependencies": {
+    "typescript": "^4.9.5",
+    "ts-node-dev": "^2.0.0",
+    "@types/node": "^18.0.0",
+    "@types/jsonwebtoken": "^8.5.9"
+  }
+  ,
+  "engines": {
+    "node": ">=18"
+  }
+}
