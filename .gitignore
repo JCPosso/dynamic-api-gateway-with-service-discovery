@@ -14,7 +14,7 @@ build/
 **/dist
 **/*.stackdump
 # npm / lockfiles
-package-lock.json
+**/package-lock.json
 yarn.lock
 
 # workspace artifacts
