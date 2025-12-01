@@ -49,34 +49,38 @@ AWS
 
 ---
 
-## 3. Estructura del repositorio
+## 3. Estructura del repositorio (estado actual)
 
-/api-gateway-dynamic
-- /infra                      # Infraestructura CDK (TypeScript)
-  - bin/infra.ts
-  - lib/
-    - vpc-stack.ts
-    - ecs-cluster-stack.ts
-    - ecs-services-stack.ts
-    - dynamodb-stack.ts
-    - api-gateway-stack.ts
-    - lambda-router-stack.ts
-    - lambda-sync-stack.ts
-- /services                   # Microservicios ECS (Node.js / Express)
-  - /users
-    - Dockerfile
-    - app.js
-  - /orders
-    - Dockerfile
-    - app.js
-- /router                     # Lambda Router (JS/TS)
- - /lambdas                   # Lambdas (Router + Sync)
-  - /router
-    - index.ts
-  - /sync
-    - index.ts
-- /docs/screenshots           # Imágenes para README
-- README.md
+Raíz del repositorio (monorepo npm workspaces):
+
+- `package.json`              : archivo raíz (workspaces: `infra`, `services/*`, `lambdas/*`)
+- `tsconfig.json`             : configuración TypeScript a nivel de monorepo
+- `README.md`
+- `.gitignore`
+
+- `infra/`                    : Infraestructura CDK (TypeScript)
+  - `bin/infra.ts`
+  - `lib/`                    : Stacks CDK (api-gateway, dynamodb, lambda-router, ...)
+  - `package.json`            : scripts/deps local a la workspace `infra`
+  - `tsconfig.json`
+
+- `lambdas/`                  : Código TypeScript de las Lambdas (Router + Sync)
+  - `lambda-router.ts`        : handler TypeScript del Lambda Router
+  - `lambda-sync.ts`          : handler TypeScript del Lambda Sync
+  - `package.json` (workspace)
+
+- `router/`                   : implementación auxiliar/legacy del router (index.ts)
+- `sync/`                     : implementación auxiliar/legacy del sync (index.js)
+
+- `services/`                 : microservicios (ejemplos en Node/Express)
+  - `users/`                  : `Dockerfile`, `app.js`, `package.json`
+  - `orders/`                 : `Dockerfile`, `app.js`, `package.json`
+
+- `docs/screenshots/`         : imágenes usadas en el README
+
+Notas:
+- El repositorio usa un `package-lock.json` raíz (reproducibilidad). Evitamos lockfiles por workspace — las dependencias se gestionan desde la raíz mediante npm workspaces.
+- Algunos directorios (`router/`, `sync/`) contienen implementaciones auxiliares o históricas; las lambdas "productivas" están en `lambdas/`.
 
 ---
 
@@ -85,17 +89,24 @@ AWS
 4.1 Preparación del entorno local
 ```bash
 git clone <url-del-repo>
-cd api-gateway-dynamic-with-service-discovery
-# Usamos un único `package.json` raíz con workspaces (infra, services/*, lambdas/*)
-# Instala dependencias y enlaza workspaces
+cd dynamic-api-gateway-with-service-discovery
+
+# Instalar dependencias desde la raíz (npm workspaces). Esto genera un único lockfile en la raíz.
 npm install
 
-# Para desarrollo con recarga en una lambda concreta:
-npm --workspace=lambdas/router run dev
-npm --workspace=lambdas/sync run dev
+# Opciones de desarrollo
 
-# Construir (CDK) e infra desde la workspace correspondiente:
-cd infra && npm run build
+# - Ejecutar un microservicio de ejemplo (por ejemplo `users`):
+cd services/users
+npm start
+
+# - Ejecutar una lambda en modo desarrollo (hot reload). Desde la raíz puedes invocar:
+npm --workspace=lambdas run dev
+
+# - Compilar la infra CDK (TypeScript) y sintetizar:
+cd infra
+npm run build
+npx cdk synth
 ```
 ![](./docs/screenshots/01-install.png)
 
@@ -112,6 +123,26 @@ docker tag users:latest <account>.dkr.ecr.us-east-1.amazonaws.com/users:latest
 docker push <account>.dkr.ecr.us-east-1.amazonaws.com/users:latest
 ```
 ![](./docs/screenshots/02-docker-build.png)
+
+Mejoras recomendadas para Dockerfiles
+- Use `npm ci --only=production` en la fase final de build para imágenes de producción.
+- Etiqueta las imágenes con `:${GITHUB_SHA}` o `:v1.0.0` además de `:latest` para trazabilidad.
+
+Ejemplo (comandos recomendados)
+```bash
+# construir con etiqueta semántica
+docker build -t users:1.0.0 services/users
+
+# etiquetar para ECR
+docker tag users:1.0.0 <account>.dkr.ecr.us-east-1.amazonaws.com/users:1.0.0
+docker tag users:1.0.0 <account>.dkr.ecr.us-east-1.amazonaws.com/users:latest
+
+# login y push (ejemplo us-east-1)
+aws ecr get-login-password --region us-east-1 \
+  | docker login --username AWS --password-stdin <account>.dkr.ecr.us-east-1.amazonaws.com
+docker push <account>.dkr.ecr.us-east-1.amazonaws.com/users:1.0.0
+docker push <account>.dkr.ecr.us-east-1.amazonaws.com/users:latest
+```
 
 4.3 Desplegar la infraestructura (CDK)
 ```bash
@@ -151,6 +182,43 @@ Respuesta esperada:
 HTTP/1.1 200 OK
 {"status":"ok","service":"users"}
 ![](./docs/screenshots/05-curl-health.png)
+
+4.6 Pruebas locales y comprobaciones rápidas
+
+- Probar microservicio `users` localmente (sin Docker):
+```bash
+cd services/users
+npm install
+npm start
+# luego en otra terminal
+curl -i http://localhost:3000/health
+```
+
+- Probar `orders` localmente igual que arriba (puerto 3000 por defecto).
+
+- Probar Router (desplegado en API Gateway):
+```bash
+curl -i https://<api-id>.execute-api.<region>.amazonaws.com/svc/users/health 
+```
+
+- Prueba manual del Router en local (opcional/experimental):
+  - Puedes ejecutar la lambda localmente con herramientas como AWS SAM CLI (`sam local invoke`) o `@aws-lambda-ric`/`aws-lambda-ric` para invocar el handler. Requiere empaquetar event JSON que simule la petición API Gateway.
+
+Ejemplo mínimo de evento (guardar en `event.json`) para invocar la lambda del router desde SAM o `aws lambda invoke`:
+```json
+{
+  "rawPath": "/svc/users/health",
+  "requestContext": { "http": { "method": "GET" } },
+  "headers": { "authorization": "Bearer <token>" }
+}
+```
+
+Luego puedes ejecutar (si usas SAM):
+```bash
+sam local invoke LambdaRouter --event event.json
+```
+
+Nota: el router espera que el Service Registry (DynamoDB) ya tenga la entrada del servicio; para pruebas locales puedes saltarte la verificación modificando temporalmente el handler o inyectando una URL de destino conocida.
 
 ---
 
