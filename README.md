@@ -91,7 +91,7 @@ cd infra && npm install
 cd ../router && npm install
 cd ../sync && npm install
 ```
-Pantallazo sugerido: `01-install.png`
+![](./docs/screenshots/01-install.png)
 
 4.2 Construcción de imágenes Docker y push a ECR (opcional)
 ```bash
@@ -105,7 +105,7 @@ $(aws ecr get-login-password --region us-east-1 | docker login --username AWS --
 docker tag users:latest <account>.dkr.ecr.us-east-1.amazonaws.com/users:latest
 docker push <account>.dkr.ecr.us-east-1.amazonaws.com/users:latest
 ```
-Pantallazo: `02-docker-build.png`
+![](./docs/screenshots/02-docker-build.png)
 
 4.3 Desplegar la infraestructura (CDK)
 ```bash
@@ -114,7 +114,7 @@ npx cdk bootstrap
 npx cdk synth
 npx cdk deploy --all
 ```
-Pantallazo: `03-cdk-deploy.png`
+![](./docs/screenshots/03-cdk-deploy.png)
 
 Recursos creados (resumen):
 - VPC, ECS cluster (EC2 mode), AutoScaling Group
@@ -144,7 +144,7 @@ curl -i https://<api-id>.execute-api.<region>.amazonaws.com/proxy/users/health
 Respuesta esperada:
 HTTP/1.1 200 OK
 {"status":"ok","service":"users"}
-Pantallazo: `05-curl-health.png`
+![](./docs/screenshots/05-curl-health.png)
 
 ---
 
@@ -179,7 +179,7 @@ Alarmas sugeridas:
 - Latencia p95 > 1s
 - DynamoDB throttling
 
-Pantallazo: `06-cloudwatch-dashboard.png`
+![](./docs/screenshots/06-cloudwatch-dashboard.png)
 
 ---
 
