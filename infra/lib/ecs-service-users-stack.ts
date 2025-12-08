@@ -18,7 +18,7 @@ export class EcsServiceUsersStack extends Stack {
     const taskDef = new ecs.Ec2TaskDefinition(this, "TaskDef");
 
     taskDef.addContainer("AppContainer", {
-      image: ecs.ContainerImage.fromAsset("../services/users"),
+      image: ecs.ContainerImage.fromAsset("./services/users"),
       memoryLimitMiB: 256,
       portMappings: [{ containerPort: 3000 }],
       logging: new ecs.AwsLogDriver({ streamPrefix: serviceName }),

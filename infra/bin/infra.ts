@@ -4,8 +4,8 @@ import { LambdaRouterStack } from "../lib/lambda-router-stack";
 import { ApiGatewayStack } from "../lib/api-gateway-stack";
 import { EcsClusterStack } from "../lib/ecs-cluster-stack";
 import { EcsServiceUsersStack } from "../lib/ecs-service-users-stack";
-import { LambdaSyncStack } from "@infra/lib/lambda-sync-stack";
-import { EcsServiceOrdersStack } from "@infra/lib/ecs-service-orders-stack";
+import { LambdaSyncStack } from "../lib/lambda-sync-stack";
+import { EcsServiceOrdersStack } from "../lib/ecs-service-orders-stack";
 
 const app = new cdk.App();
 

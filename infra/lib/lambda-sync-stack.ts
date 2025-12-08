@@ -18,7 +18,7 @@ export class LambdaSyncStack extends Stack {
     const syncLambda = new lambda.Function(this, "SyncLambda", {
       runtime: lambda.Runtime.NODEJS_18_X,
       handler: "handler.main",
-      code: lambda.Code.fromAsset("../lambdas/sync"),
+      code: lambda.Code.fromAsset("./lambdas/sync"),
       environment: {
         SERVICE_REGISTRY_TABLE: serviceRegistryTable.tableName,
         ECS_CLUSTER: clusterName,

@@ -15,7 +15,7 @@ export class EcsServiceOrdersStack extends Stack {
     const taskDef = new ecs.Ec2TaskDefinition(this, "OrdersTaskDef");
 
     taskDef.addContainer("OrdersContainer", {
-      image: ecs.ContainerImage.fromAsset("../services/orders"),
+      image: ecs.ContainerImage.fromAsset("./services/orders"),
       memoryLimitMiB: 256,
       portMappings: [{ containerPort: 3001 }],
     });
