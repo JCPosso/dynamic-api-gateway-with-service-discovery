@@ -26,6 +26,10 @@ yarn-error.log*
 .terraform/
 .aws-sam/
 
+# CDK root outputs
+/cdk.out/
+/cdk-out/
+
 # CDK / build outputs
 /infra/cdk-out/
 /infra/cdk.out/
