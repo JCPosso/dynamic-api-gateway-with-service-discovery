@@ -74,14 +74,49 @@ exports.main = async (event) => {
       };
     }
 
-    const { host, port } = res.Item;
-    console.log("Resolved host:", host, "port:", port);
+    // -----------------------------------------------------------------
+    // 3. Enrutamiento: si hay functionArn -> invocar Lambda, si hay IP -> HTTP
+    // -----------------------------------------------------------------
+    if (res.Item.functionArn) {
+      const lambdaPayload = {
+        path: relativePath,
+        rawPath: relativePath,
+        httpMethod: event.requestContext.http.method,
+        headers: sanitizeHeaders(event.headers),
+        body: event.body,
+        isBase64Encoded: event.isBase64Encoded,
+        queryStringParameters: event.queryStringParameters || {},
+      };
 
-    // -----------------------------------------------------------------
-    // 3. Preparar options para hacer proxy HTTP interno
-    // -----------------------------------------------------------------
+      const invokeRes = await new AWS.Lambda()
+        .invoke({
+          FunctionName: res.Item.functionArn,
+          InvocationType: "RequestResponse",
+          Payload: JSON.stringify(lambdaPayload),
+        })
+        .promise();
+
+      const payload = JSON.parse(invokeRes.Payload || "{}");
+      return {
+        statusCode: payload.statusCode || 502,
+        headers: payload.headers || {},
+        body: payload.body || "",
+      };
+    }
+
+    const { ip } = res.Item;
+    if (!ip) {
+      return {
+        statusCode: 503,
+        body: `Service ${serviceName} has no IP registered`,
+      };
+    }
+
+    const port = serviceName === "users" ? 3000 : 3001;
+    console.log("Resolved IP:", ip, "port:", port);
+
     const options = {
-      hostname: host,
+      hostname: ip,
       port,
       path: relativePath + (event.rawQueryString ? `?${event.rawQueryString}` : ""),
       method: event.requestContext.http.method,
@@ -97,14 +132,8 @@ exports.main = async (event) => {
 
     console.log("Proxying with options:", options);
 
-    // -----------------------------------------------------------------
-    // 4. Hacer proxy al microservicio ECS
-    // -----------------------------------------------------------------
     const response = await httpRequest(options, body);
 
-    // -----------------------------------------------------------------
-    // 5. Respuesta
-    // -----------------------------------------------------------------
     return {
       statusCode: response.statusCode,
       headers: filterResponseHeaders(response.headers),

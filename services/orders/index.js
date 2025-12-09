@@ -1,4 +1,5 @@
-import express from "express";
+const express = require("express");
+const { registerIp } = require("../registerIp.js");
 
 const app = express();
 app.use(express.json());
@@ -51,6 +52,7 @@ app.delete("/orders/:id", (req, res) => {
 // SERVICE PORT (important)
 const PORT = process.env.PORT || 3001;
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`Orders service on port ${PORT}`);
+  await registerIp("orders", process.env.DYNAMODB_TABLE);
 });

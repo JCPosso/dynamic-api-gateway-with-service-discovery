@@ -1,41 +1,49 @@
 import * as cdk from "aws-cdk-lib";
 import { DynamoDbStack } from "../lib/dynamodb-stack";
-import { LambdaRouterStack } from "../lib/lambda-router-stack";
 import { ApiGatewayStack } from "../lib/api-gateway-stack";
-import { EcsClusterStack } from "../lib/ecs-cluster-stack";
-import { EcsServiceUsersStack } from "../lib/ecs-service-users-stack";
-import { LambdaSyncStack } from "../lib/lambda-sync-stack";
-import { EcsServiceOrdersStack } from "../lib/ecs-service-orders-stack";
+import { LambdaRouterStack } from "../lib/lambda-router-stack";
+import { Ec2ServiceStack } from "../lib/ec2-service-stack";
 
 const app = new cdk.App();
 
-const dynamo = new DynamoDbStack(app, "ServiceRegistryStack");
-const ecsCluster = new EcsClusterStack(app, "EcsClusterStack");
+// Definir el entorno de AWS (necesario para VPC lookup)
+const env = {
+  account: process.env.CDK_DEFAULT_ACCOUNT || "646981656470",
+  region: process.env.CDK_DEFAULT_REGION || "us-east-1",
+};
 
-const usersService = new EcsServiceUsersStack(app, "UsersServiceStack", {
-  cluster: ecsCluster.cluster,
+const dynamo = new DynamoDbStack(app, "ServiceRegistryStack", { env });
+
+// Repositorio que contiene los servicios Node.js
+const repoUrl =
+  process.env.SERVICE_GIT_REPO ||
+  "https://github.com/JCPosso/dynamic-api-gateway-with-service-discovery.git";
+
+// new Ec2ServiceStack(app, "OrdersEc2Stack", {
+//   env,
+//   serviceName: "orders",
+//   serviceDirectory: "services/orders",
+//   servicePort: 3001,
+//   serviceRegistryTable: dynamo.serviceRegistry,
+//   gitRepoUrl: repoUrl,
+// });
+
+new Ec2ServiceStack(app, "UsersEc2Stack", {
+  env,
   serviceName: "users",
-});
-new LambdaSyncStack(app, "UsersSyncStack", {
+  serviceDirectory: "services/users",
+  servicePort: 3000,
   serviceRegistryTable: dynamo.serviceRegistry,
-  clusterName: ecsCluster.cluster.clusterName,
-  ecsServiceName: usersService.service.serviceName,
+  gitRepoUrl: repoUrl,
 });
 
 const router = new LambdaRouterStack(app, "LambdaRouterStack", {
+  env,
   serviceRegistryTable: dynamo.serviceRegistry,
 });
 
 new ApiGatewayStack(app, "ApiGatewayStack", {
+  env,
   routerLambda: router.routerLambda,
 });
 
-const ordersService = new EcsServiceOrdersStack(app, "OrdersServiceStack", {
-  cluster: ecsCluster.cluster,
-  serviceName: "orders",
-});
-new LambdaSyncStack(app, "OrdersSyncStack", {
-  serviceRegistryTable: dynamo.serviceRegistry,
-  clusterName: ecsCluster.cluster.clusterName,
-  ecsServiceName: ordersService.service.serviceName,
-});
