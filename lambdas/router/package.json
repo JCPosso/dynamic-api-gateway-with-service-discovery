@@ -1,0 +1,9 @@
+{
+  "name": "router-lambda",
+  "version": "1.0.0",
+  "private": true,
+  "main": "handler.js",
+  "dependencies": {
+    "aws-sdk": "^2.1520.0"
+  }
+}

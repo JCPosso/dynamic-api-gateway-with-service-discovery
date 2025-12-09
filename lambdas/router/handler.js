@@ -41,8 +41,10 @@ exports.main = async (event) => {
     // -----------------------------------------------------------------
     // 1. Extraer serviceName de la ruta del API Gateway
     //    /users/... → serviceName = "users"
+    // Nota: API Gateway proxy solo envía 'path', no 'rawPath'
     // -----------------------------------------------------------------
-    const pathParts = event.rawPath.split("/").filter(Boolean);
+    const requestPath = event.rawPath || event.path || "/";
+    const pathParts = requestPath.split("/").filter(Boolean);
 
     if (pathParts.length === 0) {
       return {
@@ -118,8 +120,8 @@ exports.main = async (event) => {
     const options = {
       hostname: ip,
       port,
-      path: relativePath + (event.rawQueryString ? `?${event.rawQueryString}` : ""),
-      method: event.requestContext.http.method,
+      path: relativePath + (event.rawQueryString || event.queryStringParameters ? `?${event.rawQueryString || new URLSearchParams(event.queryStringParameters || {}).toString()}` : ""),
+      method: event.requestContext.http.method || event.httpMethod,
       headers: sanitizeHeaders(event.headers),
     };
 

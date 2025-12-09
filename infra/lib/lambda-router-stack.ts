@@ -28,7 +28,17 @@ export class LambdaRouterStack extends Stack {
       handler: "handler.main",
       timeout: Duration.seconds(10),
       memorySize: 256,
-      code: lambda.Code.fromAsset(path.join(__dirname, "../../lambdas/router")),
+      code: lambda.Code.fromAsset(path.join(__dirname, "../../lambdas/router"), {
+        bundling: {
+          image: lambda.Runtime.NODEJS_18_X.bundlingImage,
+          command: [
+            "bash",
+            "-c",
+            // Install dependencies so aws-sdk is available in the bundle (set cache to writable path)
+            "NPM_CONFIG_CACHE=/tmp/.npm npm install && cp -au . /asset-output",
+          ],
+        },
+      }),
       role: lambdaRole,
       environment: {
         SERVICE_REGISTRY_TABLE: serviceRegistryTableName,
