@@ -96,9 +96,8 @@ export class Ec2ServiceStack extends Stack {
       docker rmi ${props.serviceName} || true
 
       # Build and run Docker container from services directory
-      # Extract just the service name (orders/users) from serviceDirectory (services/orders or services/users)
-      SERVICE_NAME=$(basename ${props.serviceDirectory})
-      docker build -t ${props.serviceName}:latest -f $SERVICE_NAME/Dockerfile .
+      # serviceDirectory is "${props.serviceDirectory}" so we extract just "orders" or "users"
+      docker build -t ${props.serviceName}:latest -f ${props.serviceName}/Dockerfile .
       docker run -d --restart unless-stopped --name ${props.serviceName} \
         -p ${props.servicePort}:${props.servicePort} \
         -e DYNAMODB_TABLE=${props.dynamoDbTableName} \
