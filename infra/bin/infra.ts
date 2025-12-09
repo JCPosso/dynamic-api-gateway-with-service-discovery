@@ -12,7 +12,15 @@ const env = {
   region: process.env.CDK_DEFAULT_REGION || "us-east-1",
 };
 
-const dynamo = new DynamoDbStack(app, "ServiceRegistryStack", { env });
+// Si estamos haciendo deploy solo de EC2, no crear las otras stacks
+const deployOnlyEC2 = process.env.DEPLOY_ONLY_EC2 === "true";
+
+let dynamoTableName = "ServiceRegistryStack-ServiceRegistryC10B6608-D2AX099FCN8Y";
+
+if (!deployOnlyEC2) {
+  const dynamo = new DynamoDbStack(app, "ServiceRegistryStack", { env });
+  dynamoTableName = dynamo.serviceRegistry.tableName;
+}
 
 // Repositorio que contiene los servicios Node.js
 const repoUrl =
@@ -24,7 +32,7 @@ new Ec2ServiceStack(app, "OrdersEc2Stack", {
   serviceName: "orders",
   serviceDirectory: "services/orders",
   servicePort: 3001,
-  serviceRegistryTable: dynamo.serviceRegistry,
+  dynamoDbTableName: dynamoTableName,
   gitRepoUrl: repoUrl,
 });
 
@@ -33,17 +41,19 @@ new Ec2ServiceStack(app, "UsersEc2Stack", {
   serviceName: "users",
   serviceDirectory: "services/users",
   servicePort: 3000,
-  serviceRegistryTable: dynamo.serviceRegistry,
+  dynamoDbTableName: dynamoTableName,
   gitRepoUrl: repoUrl,
 });
 
-const router = new LambdaRouterStack(app, "LambdaRouterStack", {
-  env,
-  serviceRegistryTable: dynamo.serviceRegistry,
-});
+if (!deployOnlyEC2) {
+  const router = new LambdaRouterStack(app, "LambdaRouterStack", {
+    env,
+    serviceRegistryTableName: dynamoTableName,
+  });
 
-new ApiGatewayStack(app, "ApiGatewayStack", {
-  env,
-  routerLambda: router.routerLambda,
-});
+  new ApiGatewayStack(app, "ApiGatewayStack", {
+    env,
+    routerLambda: router.routerLambda,
+  });
+}
 
