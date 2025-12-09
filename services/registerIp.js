@@ -1,36 +1,48 @@
 const AWS = require("aws-sdk");
-const https = require("https");
 const os = require("os");
 
 async function getPublicIp() {
-  return new Promise((resolve) => {
-    https.get("https://checkip.amazonaws.com/", (res) => {
-      let data = "";
-      res.on("data", (chunk) => (data += chunk));
-      res.on("end", () => resolve(data.trim()));
-    }).on("error", () => {
-      // Fallback a IP privada si no se puede obtener IP pública
-      const ip = Object.values(os.networkInterfaces())
-        .flat()
-        .find((iface) => iface.family === "IPv4" && !iface.internal)?.address;
-      resolve(ip || "unknown");
+  try {
+    // Intentar obtener IP pública desde checkip.amazonaws.com
+    const response = await fetch("https://checkip.amazonaws.com/", {
+      timeout: 5000,
     });
-  });
+    const ip = await response.text();
+    return ip.trim();
+  } catch (error) {
+    console.warn("Failed to get public IP, using private IP:", error.message);
+    // Fallback a IP privada
+    const ip = Object.values(os.networkInterfaces())
+      .flat()
+      .find((iface) => iface.family === "IPv4" && !iface.internal)?.address;
+    return ip || "unknown";
+  }
 }
 
 async function registerIp(serviceName, tableName) {
+  console.log(
+    `[registerIp] Starting registration for ${serviceName}, tableName: ${tableName}`
+  );
+
   try {
     if (!tableName) {
-      console.warn("DYNAMODB_TABLE env var not set, skipping registration");
+      console.warn(
+        `[registerIp] DYNAMODB_TABLE env var not set, skipping registration`
+      );
       return;
     }
+
+    console.log(
+      `[registerIp] Getting public IP for service: ${serviceName}`
+    );
+    const ip = await getPublicIp();
+    console.log(
+      `[registerIp] Obtained IP: ${ip} for service: ${serviceName}`
+    );
 
     const dynamodb = new AWS.DynamoDB.DocumentClient({
       region: process.env.AWS_DEFAULT_REGION || "us-east-1",
     });
-
-    const ip = await getPublicIp();
-    console.log(`Obtained IP for registration: ${ip}`);
 
     const params = {
       TableName: tableName,
@@ -42,10 +54,20 @@ async function registerIp(serviceName, tableName) {
       },
     };
 
+    console.log(
+      `[registerIp] Putting item to DynamoDB:`,
+      JSON.stringify(params, null, 2)
+    );
     await dynamodb.put(params).promise();
-    console.log(`✓ Service '${serviceName}' registered in DynamoDB with IP: ${ip}`);
+    console.log(
+      `✓ Service '${serviceName}' successfully registered in DynamoDB with IP: ${ip}:${process.env.PORT}`
+    );
   } catch (err) {
-    console.error(`✗ Error registering '${serviceName}' in DynamoDB:`, err.message);
+    console.error(
+      `✗ Error registering '${serviceName}' in DynamoDB:`,
+      err.message,
+      err.stack
+    );
   }
 }
 
