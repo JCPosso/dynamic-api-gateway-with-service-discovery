@@ -4,6 +4,10 @@ const app = express();
 
 app.use(express.json());
 
+app.get("/health", (req, res) => {
+  res.json({ status: "ok", service: "users" });
+});
+
 app.get("/list", (req, res) => {
   res.json({ users: ["Ana", "Luis", "Carlos"] });
 });

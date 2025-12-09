@@ -92,14 +92,18 @@ export class Ec2ServiceStack extends Stack {
 
       npm install --production
 
-      # Stop and remove old container if it exists
+      # Clean ALL Docker artifacts to ensure fresh build
       docker stop ${props.serviceName} || true
       docker rm ${props.serviceName} || true
+      docker rmi ${props.serviceName}:latest || true
       docker rmi ${props.serviceName} || true
+      # Remove dangling images and prune build cache
+      docker image prune -af
+      docker builder prune -af
 
-      # Build and run Docker container from services directory
+      # Build and run Docker container from services directory with --no-cache
       # serviceDirectory is "${props.serviceDirectory}" so we extract just "orders" or "users"
-      docker build -t ${props.serviceName}:latest -f ${props.serviceName}/Dockerfile .
+      docker build --no-cache -t ${props.serviceName}:latest -f ${props.serviceName}/Dockerfile .
       docker run -d --restart unless-stopped --name ${props.serviceName} \
         -p ${props.servicePort}:${props.servicePort} \
         -e DYNAMODB_TABLE=${props.dynamoDbTableName} \

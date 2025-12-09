@@ -7,21 +7,30 @@
 # correctly within AWS Academy resource constraints
 #
 # Usage: ./test.sh
-#   or: API_URL="https://xxx.execute-api.us-east-1.amazonaws.com/dev" ./test.sh
+#   or: API_URL="https://<api-id>.execute-api.us-east-1.amazonaws.com/dev" ./test.sh
 # Optional skips for constrained environments:
-#   SKIP_LOGS=true  SKIP_ECS=true  SKIP_PERF=true
+#   SKIP_LOGS=true  SKIP_PERF=true  SKIP_API=true
+# Notes:
+# - API_URL is required for API tests (routing/error/performance). If unset, those tests are skipped.
+# - DYNAMODB_TABLE can override the default created by ServiceRegistryStack.
 ##############################################################################
 
 set -e
 
 # Configuration
-API_URL="${API_URL:-https://ect71idvv2.execute-api.us-east-1.amazonaws.com/dev}"
+API_URL="${API_URL:-}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
-DYNAMODB_TABLE="ServiceRegistry"
+DYNAMODB_TABLE="${DYNAMODB_TABLE:-ServiceRegistryStack-ServiceRegistryC10B6608-D2AX099FCN8Y}"
 
 # Optional skips for constrained environments
 SKIP_LOGS="${SKIP_LOGS:-false}"      # Skip CloudWatch log checks
 SKIP_PERF="${SKIP_PERF:-false}"      # Skip performance timing
+SKIP_API="${SKIP_API:-false}"        # Skip API tests (routing/error/perf)
+
+# If API_URL is not provided, automatically skip API-dependent tests
+if [ -z "$API_URL" ]; then
+  SKIP_API=true
+fi
 
 # Color codes for output
 GREEN='\033[0;32m'
@@ -84,9 +93,12 @@ test_service_discovery() {
   services=$(aws dynamodb scan \
     --table-name "$DYNAMODB_TABLE" \
     --region "$AWS_REGION" \
-    --output json 2>/dev/null | jq '.Items | length')
-  
-  if [ "$services" -ge 2 ]; then
+    --output json 2>/dev/null | jq '.Items | length' 2>/dev/null)
+
+  # Default to 0 if command/jq fails or returns empty
+  services=${services:-0}
+
+  if [ "$services" -ge 2 ] 2>/dev/null; then
     print_pass "Service discovery: Found $services services registered"
     
     # Print registered services
@@ -117,8 +129,9 @@ test_endpoint() {
     -H "Content-Type: application/json" \
     "$API_URL$path" 2>/dev/null || echo -e "\nERROR")
   
-  http_code=$(echo "$response" | tail -n1)
-  body=$(echo "$response" | head -n -1)
+  http_code=$(printf "%s" "$response" | tail -n1)
+  # Drop the last line (status) in a portable way
+  body=$(printf "%s" "$response" | sed '$d')
   
   if [ "$http_code" = "$expected_code" ]; then
     print_pass "$test_name (HTTP $http_code)"
@@ -131,6 +144,11 @@ test_endpoint() {
 }
 
 test_routing() {
+  if [ "$SKIP_API" = "true" ]; then
+    print_skip "Routing tests skipped (API_URL not set or SKIP_API=true)"
+    return 0
+  fi
+
   print_header "Test 2: Routing (API Gateway → Lambda → Services)"
   
   test_endpoint "Users Health Check" "/users/health" "200"
@@ -143,6 +161,11 @@ test_routing() {
 ##############################################################################
 
 test_error_handling() {
+  if [ "$SKIP_API" = "true" ]; then
+    print_skip "Error handling tests skipped (API_URL not set or SKIP_API=true)"
+    return 0
+  fi
+
   print_header "Test 3: Error Handling"
   
   print_test "Non-existent service (should return 404 or 502)"
@@ -218,17 +241,20 @@ test_performance() {
     return 0
   fi
 
-  print_header "Test 6: Performance Baseline (AWS Academy Constraints)"
+  if [ "$SKIP_API" = "true" ]; then
+    print_skip "Performance timing skipped (API_URL not set or SKIP_API=true)"
+    return 0
+  fi
+
+  print_header "Test 5: Performance Baseline (AWS Academy Constraints)"
   
   print_test "Measuring response time (single request)"
   
-  start=$(date +%s%N)
   response=$(curl -s -w "\n%{time_total}" \
     --max-time 10 \
     "$API_URL/users/health" 2>/dev/null)
   
-  response_time=$(echo "$response" | tail -n1)
-  http_code=$(echo "$response" | grep -o "^[0-9]*" | head -1)
+  response_time=$(printf "%s" "$response" | tail -n1)
   
   if [ -n "$response_time" ]; then
     # Convert to milliseconds
@@ -286,10 +312,10 @@ main() {
   require_cmd curl
 
   echo "Configuration:"
-  echo "  API URL: $API_URL"
+  echo "  API URL: ${API_URL:-<not set>}"
   echo "  Region: $AWS_REGION"
   echo "  DynamoDB Table: $DYNAMODB_TABLE"
-  echo "  Skip Logs: $SKIP_LOGS | Skip Perf: $SKIP_PERF"
+  echo "  Skip Logs: $SKIP_LOGS | Skip Perf: $SKIP_PERF | Skip API: $SKIP_API"
   
   # Run tests
   test_service_discovery || true

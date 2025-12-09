@@ -121,9 +121,9 @@ Lambda Router Handler (proxy)
 
 ### AWS (AWS Academy o Producción)
 
-- **Permisos IAM**: EC2, ECS (EC2), DynamoDB, Lambda, API Gateway, CloudWatch, AutoScaling
+- **Permisos IAM**: EC2, DynamoDB, Lambda, API Gateway, CloudWatch, AutoScaling (LabRole funciona en AWS Academy)
 - **Recursos**: Limitados en AWS Academy (1-2 AZ, cuotas reducidas)
-- **VPC**: Con subnets públicas y privadas
+- **VPC**: VPC por defecto habilitada
 
 ---
 
@@ -210,10 +210,15 @@ npx cdk diff
 ```
 
 **Salida esperada:**
-- API Gateway Endpoint URL: `https://ect71idvv2.execute-api.us-east-1.amazonaws.com/dev`
-- ECS Cluster, Services, Tasks
-- DynamoDB ServiceRegistry table
-- Lambda functions
+- `ServiceRegistryStack` → tabla DynamoDB (nombre se muestra en outputs)
+- `UsersEc2Stack` y `OrdersEc2Stack` → instancias EC2 con servicios en 3000/3001
+- `LambdaRouterStack` → Lambda Router con `SERVICE_REGISTRY_TABLE`
+- `ApiGatewayStack` → URL del API Gateway (stage `dev`), usarla como `API_URL`
+
+Variables útiles:
+- `SERVICE_GIT_REPO`: repo que clonan las instancias EC2 (por defecto este repo)
+- `DEPLOY_ONLY_EC2=true DYNAMODB_TABLE=<tabla>`: despliega solo EC2 usando una tabla existente (no crea DynamoDB, Lambda ni API Gateway)
+- `CDK_DEFAULT_ACCOUNT` / `CDK_DEFAULT_REGION`: sobreescribir cuenta/región (por defecto 646981656470 / us-east-1)
 
 ---
 
@@ -222,7 +227,7 @@ npx cdk diff
 ### Paso 1: Verify DynamoDB Registry
 
 ```bash
-aws dynamodb scan --table-name ServiceRegistry --region us-east-1
+aws dynamodb scan --table-name <tabla ServiceRegistry> --region us-east-1
 ```
 
 **Salida esperada** (2 items):
@@ -249,7 +254,7 @@ aws dynamodb scan --table-name ServiceRegistry --region us-east-1
 
 ```bash
 # Usar tu API Gateway URL (de outputs de cdk deploy)
-API_URL="https://ect71idvv2.execute-api.us-east-1.amazonaws.com/dev"
+API_URL="https://<api-id>.execute-api.us-east-1.amazonaws.com/dev"
 
 # Probar users service
 curl -i "$API_URL/users/health"
@@ -266,10 +271,10 @@ curl -i "$API_URL/orders/orders"
 # Lambda Router logs
 aws logs tail /aws/lambda/lambda-router --follow --region us-east-1
 
-# ECS Task logs
-# Logs de microservicios (si envías logs a CloudWatch desde EC2)
-# aws logs tail /ec2/users-service --follow --region us-east-1
-# aws logs tail /ec2/orders-service --follow --region us-east-1
+# EC2 services: los contenedores escriben a docker logs en la instancia.
+# Si necesitas verlos, conéctate por SSH y ejecuta:
+#   docker logs users
+#   docker logs orders
 ```
 
 ---
@@ -285,8 +290,11 @@ Estas pruebas verifican que el sistema funciona correctamente sin sobrecargar AW
 #### 1. Test de Descubrimiento de Servicios
 
 ```bash
+# Nombre de tabla desde outputs de CDK
+TABLE_NAME="<ServiceRegistryStack tabla>"   # ej: ServiceRegistryStack-ServiceRegistryC10B6608-D2AX099FCN8Y
+
 # Verificar que servicios están registrados en DynamoDB
-aws dynamodb scan --table-name ServiceRegistry --region us-east-1 --output table
+aws dynamodb scan --table-name "$TABLE_NAME" --region us-east-1 --output table
 
 # Esperado: 2 items (users, orders)
 ```
@@ -296,7 +304,7 @@ aws dynamodb scan --table-name ServiceRegistry --region us-east-1 --output table
 #### 2. Test de Routing Dinámico
 
 ```bash
-API_URL="https://ect71idvv2.execute-api.us-east-1.amazonaws.com/dev"
+API_URL="https://<api-id>.execute-api.us-east-1.amazonaws.com/dev"  # output de ApiGatewayStack
 
 # Test 1: GET /users/health
 echo "=== Test 1: Users Health ==="
@@ -362,53 +370,15 @@ Ejecuta el script `test.sh` (ya incluido en el repo). Flags opcionales para ento
 
 - `SKIP_LOGS=true` omite verificación de CloudWatch
 - `SKIP_PERF=true` omite medición de latencia
+- `SKIP_API=true` omite pruebas que requieren API Gateway (útil si usaste `DEPLOY_ONLY_EC2=true`)
 
 Ejemplo:
 
 ```bash
-#!/bin/bash
-
-API_URL="https://ect71idvv2.execute-api.us-east-1.amazonaws.com/dev"
-PASSED=0
-FAILED=0
-
-test_endpoint() {
-  local name=$1
-  local path=$2
-  local expected_code=$3
-
-  echo "Testing: $name"
-  response=$(curl -s -w "%{http_code}" -o /tmp/response.json "$API_URL$path")
-  http_code="${response: -3}"
-
-  if [ "$http_code" = "$expected_code" ]; then
-    echo "✅ PASS: $name (HTTP $http_code)"
-    ((PASSED++))
-  else
-    echo "❌ FAIL: $name (Expected $expected_code, got $http_code)"
-    ((FAILED++))
-  fi
-  echo ""
-}
-
-echo "=== API Gateway Auto-Discovery Tests ==="
-echo "URL: $API_URL"
-echo ""
-
-test_endpoint "Users Health" "/users/health" "200"
-test_endpoint "Users List" "/users/list" "200"
-test_endpoint "Orders List" "/orders/orders" "200"
-test_endpoint "Non-existent Service" "/unknown/path" "404"
-
-echo "=== Results ==="
-echo "Passed: $PASSED"
-echo "Failed: $FAILED"
-
-if [ $FAILED -eq 0 ]; then
-  exit 0
-else
-  exit 1
-fi
+API_URL="https://<api-id>.execute-api.us-east-1.amazonaws.com/dev" \  # requerido para pruebas de API
+DYNAMODB_TABLE="<tabla ServiceRegistry>" \                              # opcional, por defecto usa la de infra.ts
+SKIP_LOGS=true \                                                         # opcional
+./test.sh
 ```
 
 **Ejecutar**:
@@ -421,7 +391,7 @@ chmod +x test.sh
 
 | Prueba | Descripción | Comando | Esperado |
 |--------|-----------|---------|----------|
-| **Descubrimiento** | Servicios en DynamoDB | `aws dynamodb scan --table-name ServiceRegistry` | 2 items |
+| **Descubrimiento** | Servicios en DynamoDB | `aws dynamodb scan --table-name <tabla ServiceRegistry>` | 2 items |
 | **Health Check** | Endpoint de usuarios | `curl /dev/users/health` | 200 OK |
 | **List Users** | Obtener usuarios | `curl /dev/users/list` | 200 OK + JSON |
 | **List Orders** | Obtener órdenes | `curl /dev/orders/orders` | 200 OK + JSON |
@@ -499,21 +469,20 @@ aws cloudwatch get-metric-statistics \
 
 **Solución**:
 ```bash
-# 1. Revisar logs del task
-aws logs tail /ecs/users-service --follow --region us-east-1
+# 1. Identificar la instancia EC2
+aws ec2 describe-instances \
+  --filters "Name=tag:aws:cloudformation:stack-name,Values=UsersEc2Stack" \
+  --query "Reservations[].Instances[].InstanceId" --output text
 
-# 2. Verificar task status
-aws ecs list-tasks --cluster ApiGatewayCluster --region us-east-1
-aws ecs describe-tasks --cluster ApiGatewayCluster \
-  --tasks <TASK_ARN> --region us-east-1
+# 2. Conectarse por SSH (clave del laboratorio) y revisar el contenedor
+# ssh -i <key.pem> ec2-user@<public-ip>
+# docker ps
+# docker logs users
 
-# 3. Reiniciar task
-aws ecs update-service --cluster ApiGatewayCluster \
-  --service users-service --force-new-deployment --region us-east-1
+# 3. Validar que la variable DYNAMODB_TABLE esté correcta dentro del contenedor
 
 # 4. Esperar 30-60 segundos y verificar nuevamente
-sleep 60
-aws dynamodb scan --table-name ServiceRegistry --region us-east-1
+aws dynamodb scan --table-name <tabla ServiceRegistry> --region us-east-1
 ```
 
 ### Problema: API Gateway retorna 502
@@ -530,12 +499,16 @@ aws dynamodb scan --table-name ServiceRegistry --region us-east-1
 # 1. Ver logs del router
 aws logs tail /aws/lambda/lambda-router --follow --region us-east-1
 
-# 2. Verificar que servicio está corriendo
-aws ecs list-tasks --cluster ApiGatewayCluster --serviceName users-service \
-  --region us-east-1
+# 2. Verificar que el servicio está corriendo en su instancia EC2
+aws ec2 describe-instances \
+  --filters "Name=tag:aws:cloudformation:stack-name,Values=UsersEc2Stack" \
+  --query "Reservations[].Instances[].PublicIpAddress" --output text
+# ssh -i <key.pem> ec2-user@<ip>
+# docker ps
+# docker logs users
 
 # 3. Verificar IP del servicio en DynamoDB
-aws dynamodb get-item --table-name ServiceRegistry \
+aws dynamodb get-item --table-name <tabla ServiceRegistry> \
   --key '{"serviceName":{"S":"users"}}' --region us-east-1
 
 # 4. Probar conectividad desde Lambda (si es posible)
@@ -550,7 +523,7 @@ aws dynamodb get-item --table-name ServiceRegistry \
 
 **Causas**:
 1. DynamoDB está throttleado (cuota AWS Academy)
-2. ECS Task CPU/memoria saturada
+2. CPU/memoria de la instancia EC2 saturada
 3. Network latency
 
 **Solución**:
@@ -559,9 +532,13 @@ aws dynamodb get-item --table-name ServiceRegistry \
 aws logs insights --log-group-name /aws/lambda/lambda-router \
   --query-string 'fields @duration | stats avg(@duration) as avg_duration'
 
-# Ver CPU/memoria ECS
-aws ecs describe-services --cluster ApiGatewayCluster \
-  --services users-service orders-service --region us-east-1
+# Ver CPU de instancia EC2 (cambia INSTANCE_ID por el valor del stack)
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/EC2 --metric-name CPUUtilization \
+  --dimensions Name=InstanceId,Value=<INSTANCE_ID> \
+  --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 300 --statistics Average --region us-east-1
 
 # Ver throttling DynamoDB
 aws cloudwatch get-metric-statistics \
@@ -589,9 +566,11 @@ aws cloudwatch get-metric-statistics \
 npx cdk deploy --all --verbose
 
 # Probar deploy individual por stack
-npx cdk deploy DynamodbStack
+npx cdk deploy ServiceRegistryStack
+npx cdk deploy UsersEc2Stack
+npx cdk deploy OrdersEc2Stack
+npx cdk deploy LambdaRouterStack
 npx cdk deploy ApiGatewayStack
-npx cdk deploy EcsClusterStack
 
 # Si falla, revisar IAM
 aws iam get-user
@@ -615,40 +594,28 @@ aws logs tail /aws/lambda/lambda-router --follow --region us-east-1
 # Últimos 20 logs
 aws logs tail /aws/lambda/lambda-router --max-items 20 --region us-east-1
 
-# Logs ECS Services
-aws logs tail /ecs/users-service --follow --region us-east-1
-aws logs tail /ecs/orders-service --follow --region us-east-1
+# Logs de servicios EC2: acceder por SSH a la instancia y usar docker logs
+# ssh -i <key.pem> ec2-user@<ip>
+# docker logs users
+# docker logs orders
 ```
 
 #### DynamoDB
 ```bash
 # Listar todos los servicios registrados
-aws dynamodb scan --table-name ServiceRegistry --region us-east-1
+aws dynamodb scan --table-name <tabla ServiceRegistry> --region us-east-1
 
 # Buscar servicio específico
 aws dynamodb get-item \
-  --table-name ServiceRegistry \
+  --table-name <tabla ServiceRegistry> \
   --key '{"serviceName":{"S":"users"}}' \
   --region us-east-1
 
 # Eliminar registro manual (si es necesario)
 aws dynamodb delete-item \
-  --table-name ServiceRegistry \
+  --table-name <tabla ServiceRegistry> \
   --key '{"serviceName":{"S":"orders"}}' \
   --region us-east-1
-```
-
-#### ECS
-```bash
-# Listar tasks corriendo
-aws ecs list-tasks --cluster ApiGatewayCluster --region us-east-1
-
-# Describir task específica
-aws ecs describe-tasks --cluster ApiGatewayCluster --tasks <TASK_ARN> --region us-east-1
-
-# Force redeploy de servicio
-aws ecs update-service --cluster ApiGatewayCluster \
-  --service users-service --force-new-deployment --region us-east-1
 ```
 
 #### CloudWatch Metrics
@@ -669,12 +636,11 @@ aws cloudwatch get-metric-statistics \
 ```bash
 # En ~/.zshrc o ~/.bashrc
 export AWS_REGION=us-east-1
-export API_GATEWAY_URL="https://ect71idvv2.execute-api.us-east-1.amazonaws.com/dev"
-export DYNAMODB_TABLE="ServiceRegistry"
-export ECS_CLUSTER="ApiGatewayCluster"
+export API_URL="https://<api-id>.execute-api.us-east-1.amazonaws.com/dev"   # output de ApiGatewayStack
+export DYNAMODB_TABLE="ServiceRegistryStack-ServiceRegistryC10B6608-D2AX099FCN8Y" # o el valor real del deploy
 
 # Ejecutar pruebas (omitir logs si tienes permisos limitados)
-SKIP_LOGS=true ./test.sh
+SKIP_LOGS=true SKIP_API=true ./test.sh
 ```
 
 ### Estructura de DynamoDB Item
