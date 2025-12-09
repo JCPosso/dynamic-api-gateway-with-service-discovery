@@ -121,7 +121,7 @@ exports.main = async (event) => {
       hostname: ip,
       port,
       path: relativePath + (event.rawQueryString || event.queryStringParameters ? `?${event.rawQueryString || new URLSearchParams(event.queryStringParameters || {}).toString()}` : ""),
-      method: event.requestContext.http.method || event.httpMethod,
+      method: event.httpMethod || (event.requestContext && event.requestContext.http && event.requestContext.http.method) || "GET",
       headers: sanitizeHeaders(event.headers),
     };
 
