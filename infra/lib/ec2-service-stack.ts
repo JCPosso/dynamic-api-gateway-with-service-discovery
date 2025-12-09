@@ -68,6 +68,9 @@ export class Ec2ServiceStack extends Stack {
       set -ex
       LOG=/var/log/user-data.log
       exec > >(tee -a $LOG | logger -t user-data -s 2>/dev/console) 2>&1
+      
+      # Force update on each deployment
+      echo "Deployment: ${new Date().getTime()}"
 
       # Update base system
       dnf update -y
