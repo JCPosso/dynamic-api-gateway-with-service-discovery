@@ -1,5 +1,5 @@
 const express = require("express");
-const { registerIp } = require("../registerIp.js");
+const { registerIp } = require("./registerIp.js");
 const app = express();
 
 app.use(express.json());
