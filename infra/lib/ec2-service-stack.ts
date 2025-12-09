@@ -1,8 +1,11 @@
-import { Stack, StackProps } from "aws-cdk-lib";
+import {
+  Stack,
+  StackProps,
+  aws_ec2 as ec2,
+  aws_iam as iam,
+  aws_dynamodb as dynamodb,
+} from "aws-cdk-lib";
 import { Construct } from "constructs";
-import * as ec2 from "aws-cdk-lib/aws-ec2";
-import * as iam from "aws-cdk-lib/aws-iam";
-import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 
 interface Ec2ServiceStackProps extends StackProps {
   serviceName: string;
@@ -18,7 +21,7 @@ export class Ec2ServiceStack extends Stack {
   constructor(scope: Construct, id: string, props: Ec2ServiceStackProps) {
     super(scope, id, props);
 
-    // Usar la VPC por defecto en lugar de crear una nueva
+    // VPC por defecto
     const vpc = ec2.Vpc.fromLookup(this, `${props.serviceName}Vpc`, {
       isDefault: true,
     });
@@ -29,24 +32,28 @@ export class Ec2ServiceStack extends Stack {
       allowAllOutbound: true,
     });
 
-    // Permitir tráfico HTTP en el puerto del servicio
     securityGroup.addIngressRule(
       ec2.Peer.anyIpv4(),
       ec2.Port.tcp(props.servicePort),
-      `Allow HTTP on port ${props.servicePort}`
+      `Allow port ${props.servicePort}`
     );
 
+    // Rol proporcionado por AWS Academy
     const role = iam.Role.fromRoleArn(
       this,
       `${props.serviceName}InstanceRole`,
       "arn:aws:iam::646981656470:role/LabRole"
     );
 
+    // AMAZON LINUX 2023 🚀
     const ami = ec2.MachineImage.latestAmazonLinux2023();
 
     this.instance = new ec2.Instance(this, `${props.serviceName}Instance`, {
       vpc,
-      instanceType: ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MICRO),
+      instanceType: ec2.InstanceType.of(
+        ec2.InstanceClass.T3,
+        ec2.InstanceSize.MICRO
+      ),
       machineImage: ami,
       role,
       securityGroup,
@@ -54,39 +61,44 @@ export class Ec2ServiceStack extends Stack {
       associatePublicIpAddress: true,
     });
 
-    // UserData para instalar Git, Docker, clonar el repo y ejecutar el contenedor
+    // ================================
+    // USER DATA PARA AL2023 (CORRECTO)
+    // ================================
     this.instance.addUserData(
       `#!/bin/bash
-      set -e
-      
-      # Instalar Git y Docker
-      yum update -y
-      yum install -y git docker
-      systemctl start docker
-      systemctl enable docker
-      usermod -a -G docker ec2-user
-      
-      # Clonar el repositorio
+      set -ex
+      LOG=/var/log/user-data.log
+      exec > >(tee -a $LOG | logger -t user-data -s 2>/dev/console) 2>&1
+
+      # Update base system
+      dnf update -y
+
+      # Install git, docker and nodejs (Node 18 by default in AL2023)
+      dnf install -y git docker nodejs
+
+      # Enable Docker
+      systemctl enable --now docker
+      usermod -aG docker ec2-user
+
+      # Prepare workspace
       cd /home/ec2-user
+      rm -rf repo
       git clone ${props.gitRepoUrl} repo
       cd repo/${props.serviceDirectory}
-      
-      # Instalar dependencias de Node.js
-      curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
-      yum install -y nodejs
+
       npm install --production
-      
-      # Construir y ejecutar el contenedor Docker
+
+      # Build and run Docker container
       docker build -t ${props.serviceName} .
-      docker run -d --name ${props.serviceName} \
+      docker run -d --restart unless-stopped --name ${props.serviceName} \
         -p ${props.servicePort}:${props.servicePort} \
         -e DYNAMODB_TABLE=${props.serviceRegistryTable.tableName} \
         -e AWS_DEFAULT_REGION=${this.region} \
         -e PORT=${props.servicePort} \
         ${props.serviceName}
-      
-      echo "Service ${props.serviceName} started successfully"
-      `
+
+      echo "Service ${props.serviceName} deployed successfully"
+`
     );
   }
 }

@@ -19,14 +19,14 @@ const repoUrl =
   process.env.SERVICE_GIT_REPO ||
   "https://github.com/JCPosso/dynamic-api-gateway-with-service-discovery.git";
 
-// new Ec2ServiceStack(app, "OrdersEc2Stack", {
-//   env,
-//   serviceName: "orders",
-//   serviceDirectory: "services/orders",
-//   servicePort: 3001,
-//   serviceRegistryTable: dynamo.serviceRegistry,
-//   gitRepoUrl: repoUrl,
-// });
+new Ec2ServiceStack(app, "OrdersEc2Stack", {
+  env,
+  serviceName: "orders",
+  serviceDirectory: "services/orders",
+  servicePort: 3001,
+  serviceRegistryTable: dynamo.serviceRegistry,
+  gitRepoUrl: repoUrl,
+});
 
 new Ec2ServiceStack(app, "UsersEc2Stack", {
   env,
