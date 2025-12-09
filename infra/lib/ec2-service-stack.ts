@@ -62,6 +62,8 @@ export class Ec2ServiceStack extends Stack {
 
     // ================================
     // USER DATA PARA AL2023 (CORRECTO)
+    // Update timestamp to force instance replacement on each deploy
+    const deploymentId = Date.now() + Math.random();
     // ================================
     this.instance.addUserData(
       `#!/bin/bash
@@ -69,8 +71,8 @@ export class Ec2ServiceStack extends Stack {
       LOG=/var/log/user-data.log
       exec > >(tee -a $LOG | logger -t user-data -s 2>/dev/console) 2>&1
       
-      # Force update on each deployment
-      echo "Deployment: ${new Date().getTime()}"
+      # Force update: ${deploymentId}
+      echo "Deployment ID: ${deploymentId}"
 
       # Update base system
       dnf update -y
