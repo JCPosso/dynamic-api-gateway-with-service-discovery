@@ -5,4 +5,4 @@ RUN npm install --production
 COPY registerIp.js ./
 COPY users/app.js ./
 EXPOSE 3000
-CMD ["node", "app.js"]
+CMD ["node", "--enable-source-maps", "app.js"]

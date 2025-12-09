@@ -5,4 +5,4 @@ RUN npm install --production
 COPY registerIp.js ./
 COPY orders/index.js ./
 EXPOSE 3001
-CMD ["node", "index.js"]
+CMD ["node", "--enable-source-maps", "index.js"]
