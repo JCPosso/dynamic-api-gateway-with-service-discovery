@@ -52,7 +52,23 @@ app.delete("/orders/:id", (req, res) => {
 // SERVICE PORT (important)
 const PORT = process.env.PORT || 3001;
 
-app.listen(PORT, async () => {
-  console.log(`Orders service on port ${PORT}`);
-  await registerIp("orders", process.env.DYNAMODB_TABLE);
+const server = app.listen(PORT, async () => {
+  console.log(`[index.js] Orders service started on port ${PORT}`);
+  try {
+    console.log(`[index.js] Starting service registration...`);
+    await registerIp("orders", process.env.DYNAMODB_TABLE);
+    console.log(`[index.js] Service registration completed`);
+  } catch (error) {
+    console.error(`[index.js] Failed to register service:`, error);
+  }
+});
+
+server.on("error", (err) => {
+  console.error(`[index.js] Server error:`, err);
+  process.exit(1);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error(`[index.js] Uncaught exception:`, err);
+  process.exit(1);
 });
