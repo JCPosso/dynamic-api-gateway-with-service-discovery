@@ -85,21 +85,28 @@ export class Ec2ServiceStack extends Stack {
       # Prepare workspace
       cd /home/ec2-user
       rm -rf repo
-      git clone ${props.gitRepoUrl} repo
+      git clone --depth 1 ${props.gitRepoUrl} repo
       cd repo/services
 
       npm install --production
 
+      # Stop and remove old container if it exists
+      docker stop ${props.serviceName} || true
+      docker rm ${props.serviceName} || true
+      docker rmi ${props.serviceName} || true
+
       # Build and run Docker container from services directory
-      docker build -t ${props.serviceName} -f ${props.serviceDirectory}/Dockerfile .
+      docker build -t ${props.serviceName}:latest -f ${props.serviceDirectory}/Dockerfile .
       docker run -d --restart unless-stopped --name ${props.serviceName} \
         -p ${props.servicePort}:${props.servicePort} \
         -e DYNAMODB_TABLE=${props.dynamoDbTableName} \
         -e AWS_DEFAULT_REGION=${this.region} \
         -e PORT=${props.servicePort} \
-        ${props.serviceName}
+        ${props.serviceName}:latest
 
+      sleep 3
       echo "Service ${props.serviceName} deployed successfully"
+      docker logs ${props.serviceName} | head -30
 `
     );
   }
