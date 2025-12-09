@@ -1,313 +1,703 @@
-# API Gateway Auto-Configurable con Service Discovery (MVP)
+# API Gateway Auto-Configurable con Service Discovery
 
-Este proyecto implementa un prototipo funcional de un API Gateway auto-configurable con Service Discovery dinámico, usando:
+**Prototipo funcional de un API Gateway con descubrimiento dinámico de servicios en AWS**
 
-- AWS CDK (TypeScript)
-- API Gateway
-- AWS Lambda (Router + Sync)
-- ECS (EC2 mode)
-- DynamoDB como Service Registry
-- CloudWatch (logs, métricas, alarmas)
+## 📋 Tabla de Contenidos
 
-📌 Índice
-1. Arquitectura
-2. Requisitos
-3. Estructura del repositorio
-4. Implementación (paso a paso)
-5. Pruebas
-6. Monitoreo y operación
-7. Seguridad y buenas prácticas
-8. Runbooks
-9. Anexos (comandos útiles)
-10. Licencia
+1. [Desafío Técnico](#desafío-técnico)
+2. [Arquitectura](#arquitectura)
+3. [Requisitos](#requisitos)
+4. [Estructura del Proyecto](#estructura-del-proyecto)
+5. [Setup Inicial](#setup-inicial)
+6. [Implementación](#implementación)
+7. [Pruebas (Compatible AWS Academy)](#pruebas-compatible-aws-academy)
+8. [Monitoreo](#monitoreo)
+9. [Resolución de Problemas](#resolución-de-problemas)
+10. [Anexos](#anexos)
 
 ---
 
-## 1. Arquitectura
+## Desafío Técnico
 
-Descripción:
-- ECS Services (users, orders, payments, ...) se auto-registran en DynamoDB.
-- API Gateway envía todo el tráfico al Lambda Router.
-- Lambda Router consulta el ServiceRegistry, selecciona una instancia y proxy HTTP hacia el microservicio.
-- Lambda Sync puede reconstruir registros o actualizar TTLs.
-- CloudWatch para logs, métricas y alarmas.
+### ❌ Problema: Configuración Estática
 
----
+En arquitecturas de microservicios tradicionales:
 
-## 2. Requisitos
+- **API Gateway tiene rutas hardcodeadas**: `/users → 10.0.1.5:3000`
+- **Escala manualmente**: Agregar servicio = reconfigurar gateway + redeploy
+- **Frágil a cambios**: Si IP de servicio cambia (fallo, actualización), rutas quedan inválidas
+- **Acoplamiento fuerte**: Gateway conoce topología específica de servicios
 
-Local (desarrollo)
-- Node.js >= 18
-- npm o yarn
-- Docker (para build de imágenes)
-- AWS CLI configurado
-- AWS CDK v2 instalado globalmente
+```
+┌─────────────────────────────┐
+│   API Gateway               │
+│  /users → 10.0.1.5:3000    │ ← Hardcoded
+│  /orders → 10.0.2.3:3001   │ ← Manual
+│  /payments → 10.0.3.1:3002 │ ← Requiere redeploy
+└─────────────────────────────┘
+```
 
-AWS
-- Permisos para: EC2, AutoScaling, ECS (EC2), DynamoDB, API Gateway, Lambda, CloudWatch
-- Limitado a 2 AZ
+### ✅ Solución: Service Discovery Dinámico
 
----
+**El API Gateway descubre servicios en tiempo de ejecución**, sin configuración estática:
 
-## 3. Estructura del repositorio (estado actual)
+```
+┌──────────────────────────┐
+│   API Gateway            │
+│  /{serviceName}/*        │ ← Ruta genérica
+└──────────────────────────┘
+           ↓
+┌──────────────────────────────────┐
+│  Lambda Router (Dinámico)        │
+│  1. Extraer: serviceName=users   │
+│  2. Consultar DynamoDB           │
+│  3. Proxy HTTP → 10.0.1.5:3000   │
+└──────────────────────────────────┘
+           ↓
+┌──────────────────────────────────┐
+│  ServiceRegistry (DynamoDB)      │
+│  {                               │
+│    serviceName: "users",         │
+│    host: "10.0.1.5",            │
+│    port: 3000,                  │
+│    ttl: 1738300000              │
+│  }                               │
+└──────────────────────────────────┘
+```
 
-Raíz del repositorio (monorepo npm workspaces):
-
-- `package.json`              : archivo raíz (workspaces: `infra`, `services/*`, `lambdas/*`)
-- `tsconfig.json`             : configuración TypeScript a nivel de monorepo
-- `README.md`
-- `.gitignore`
-
-- `infra/`                    : Infraestructura CDK (TypeScript)
-  - `bin/infra.ts`
-  - `lib/`                    : Stacks CDK (api-gateway, dynamodb, lambda-router, ...)
-  - `package.json`            : scripts/deps local a la workspace `infra`
-  - `tsconfig.json`
-
-- `lambdas/`                  : Código TypeScript de las Lambdas (Router + Sync)
-  - `lambda-router.ts`        : handler TypeScript del Lambda Router
-  - `lambda-sync.ts`          : handler TypeScript del Lambda Sync
-  - `package.json` (workspace)
-
-- `router/`                   : implementación auxiliar/legacy del router (index.ts)
-- `sync/`                     : implementación auxiliar/legacy del sync (index.js)
-
-- `services/`                 : microservicios (ejemplos en Node/Express)
-  - `users/`                  : `Dockerfile`, `app.js`, `package.json`
-  - `orders/`                 : `Dockerfile`, `app.js`, `package.json`
-
-- `docs/screenshots/`         : imágenes usadas en el README
-
-Notas:
-- El repositorio usa un `package-lock.json` raíz (reproducibilidad). Evitamos lockfiles por workspace — las dependencias se gestionan desde la raíz mediante npm workspaces.
-- Algunos directorios (`router/`, `sync/`) contienen implementaciones auxiliares o históricas; las lambdas "productivas" están en `lambdas/`.
+**Ventajas:**
+- ✅ **Agnóstico**: Gateway no conoce servicios específicos
+- ✅ **Auto-escalable**: Nuevos servicios se registran automáticamente
+- ✅ **Resiliente**: TTL en DynamoDB limpia registros obsoletos
+- ✅ **Agnóstico de IP**: Soporta cambios de infraestructura
+- ✅ **Sin redeploy**: Agregar servicio no requiere cambiar gateway
 
 ---
 
-## 4. Implementación (Paso a Paso)
+## Arquitectura
 
-4.1 Preparación del entorno local
+### Diagrama de Flujo
+
+```
+Client
+  ↓
+GET /dev/users/list
+  ↓
+API Gateway (HTTP API)
+  ↓
+Lambda Router Handler (proxy)
+  │
+  ├─ 1. Parsear path: /dev/users/list → serviceName="users"
+  │
+  ├─ 2. Consultar DynamoDB ServiceRegistry
+  │     Query: serviceName="users" → host="10.0.1.5", port=3000
+  │
+  ├─ 3. Proxy HTTP: GET http://10.0.1.5:3000/list
+  │
+  └─ 4. Return response al cliente
+```
+
+### Componentes
+
+| Componente | Descripción | Estado |
+|-----------|-----------|--------|
+| **API Gateway** | Endpoint público que enruta todo a Lambda | ✅ Funcional |
+| **Lambda Router** | Node.js handler que consulta registry y hace proxy HTTP | ✅ Funcional |
+| **DynamoDB ServiceRegistry** | Tabla con servicios activos y sus endpoints | ✅ Funcional |
+| **EC2 Services** | 2 microservicios: users:3000, orders:3001 | ✅ Funcional |
+| **CloudWatch** | Logs y métricas | ✅ Configurado |
+
+---
+
+## Requisitos
+
+### Local (Desarrollo)
+
+- **Node.js** >= 18
+- **npm** o yarn
+- **Docker** (para build de imágenes)
+- **AWS CLI** v2 configurado con credenciales
+- **AWS CDK** v2 (`npm install -g aws-cdk`)
+
+### AWS (AWS Academy o Producción)
+
+- **Permisos IAM**: EC2, ECS (EC2), DynamoDB, Lambda, API Gateway, CloudWatch, AutoScaling
+- **Recursos**: Limitados en AWS Academy (1-2 AZ, cuotas reducidas)
+- **VPC**: Con subnets públicas y privadas
+
+---
+
+## Estructura del Proyecto
+
+```
+.
+├── README.md                           ← Este archivo
+├── package.json                        ← Workspace root (npm)
+├── tsconfig.json                       ← TypeScript config
+├── cdk.json                           ← CDK context
+├── bootstrap-template.yaml            ← CloudFormation template
+│
+├── infra/                             ← AWS CDK (TypeScript)
+│   ├── bin/
+│   │   └── infra.ts                   ← Entry point CDK
+│   └── lib/
+│       ├── api-gateway-stack.ts       ← API Gateway + Lambda Router
+│       ├── dynamodb-stack.ts          ← DynamoDB ServiceRegistry
+│       ├── ec2-service-stack.ts       ← EC2 microservicios (users, orders)
+│       └── lambda-router-stack.ts     ← Lambda Router deployment
+│
+├── lambdas/                           ← Lambda handlers (Node.js)
+│   └── router/
+│       └── handler.js                 ← Router proxy logic
+│
+├── services/                          ← Microservicios (Node.js + Express)
+│   ├── users/
+│   │   ├── Dockerfile
+│   │   ├── package.json
+│   │   └── index.js                   ← Express app
+│   └── orders/
+│       ├── Dockerfile
+│       ├── package.json
+│       └── index.js                   ← Express app
+│
+├── docs/
+│   └── screenshots/                   ← Imágenes para documentación
+│
+```
+
+---
+
+## Setup Inicial
+
+### 1. Clonar y dependencias
+
 ```bash
-git clone <url-del-repo>
+git clone <repo-url>
 cd dynamic-api-gateway-with-service-discovery
 
-# Instalar dependencias desde la raíz (npm workspaces). Esto genera un único lockfile en la raíz.
+# Instalar desde raíz (npm workspaces)
 npm install
-
-# Opciones de desarrollo
-
-# - Ejecutar un microservicio de ejemplo (por ejemplo `users`):
-cd services/users
-npm start
-
-# - Ejecutar una lambda en modo desarrollo (hot reload). Desde la raíz puedes invocar:
-npm --workspace=lambdas run dev
-
-# - Compilar la infra CDK (TypeScript) y sintetizar:
-cd infra
-npm run build
-npx cdk synth
 ```
-![](./docs/screenshots/01-install.png)
 
-4.2 Construcción de imágenes Docker y push a ECR (opcional)
+### 2. Configurar AWS CLI
+
 ```bash
-# local
-docker build -t users ../services/users
-docker build -t orders ../services/orders
+aws configure
+# Ingresar: Access Key ID, Secret Access Key, región (us-east-1), output format (json)
 
-# ECR (si está permitido)
-aws ecr create-repository --repository-name users
-$(aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <account>.dkr.ecr.us-east-1.amazonaws.com)
-docker tag users:latest <account>.dkr.ecr.us-east-1.amazonaws.com/users:latest
-docker push <account>.dkr.ecr.us-east-1.amazonaws.com/users:latest
-```
-![](./docs/screenshots/02-docker-build.png)
-
-Mejoras recomendadas para Dockerfiles
-- Use `npm ci --only=production` en la fase final de build para imágenes de producción.
-- Etiqueta las imágenes con `:${GITHUB_SHA}` o `:v1.0.0` además de `:latest` para trazabilidad.
-
-Ejemplo (comandos recomendados)
-```bash
-# construir con etiqueta semántica
-docker build -t users:1.0.0 services/users
-
-# etiquetar para ECR
-docker tag users:1.0.0 <account>.dkr.ecr.us-east-1.amazonaws.com/users:1.0.0
-docker tag users:1.0.0 <account>.dkr.ecr.us-east-1.amazonaws.com/users:latest
-
-# login y push (ejemplo us-east-1)
-aws ecr get-login-password --region us-east-1 \
-  | docker login --username AWS --password-stdin <account>.dkr.ecr.us-east-1.amazonaws.com
-docker push <account>.dkr.ecr.us-east-1.amazonaws.com/users:1.0.0
-docker push <account>.dkr.ecr.us-east-1.amazonaws.com/users:latest
+# Verificar credenciales
+aws sts get-caller-identity
 ```
 
-4.3 Desplegar la infraestructura (CDK)
+### 3. Bootstrap CDK (una sola vez)
+
 ```bash
 cd infra
 npx cdk bootstrap
-npx cdk synth
-npx cdk deploy --all
+# Crea bucket S3 y rol IAM necesarios para CDK en tu cuenta
 ```
-![](./docs/screenshots/03-cdk-deploy.png)
 
-Recursos creados (resumen):
-- VPC, ECS cluster (EC2 mode), AutoScaling Group
-- DynamoDB ServiceRegistry
-- Lambdas Router + Sync
-- API Gateway, Roles IAM, CloudWatch logs
+### 4. Desplegar infraestructura
 
-4.4 Verificar auto-registro
 ```bash
-aws dynamodb scan --table-name ServiceRegistry
+# Desde raíz del repo
+cd infra
+npx cdk synth          # Genera CloudFormation template
+npx cdk deploy --all   # Despliega todos los stacks
+
+# O para ver cambios antes de deploying:
+npx cdk diff
 ```
-Elemento esperado por servicio:
+
+**Salida esperada:**
+- API Gateway Endpoint URL: `https://ect71idvv2.execute-api.us-east-1.amazonaws.com/dev`
+- ECS Cluster, Services, Tasks
+- DynamoDB ServiceRegistry table
+- Lambda functions
+
+---
+
+## Implementación
+
+### Paso 1: Verify DynamoDB Registry
+
+```bash
+aws dynamodb scan --table-name ServiceRegistry --region us-east-1
+```
+
+**Salida esperada** (2 items):
+```json
+{
+  "Items": [
+    {
+      "serviceName": {"S": "users"},
+      "host": {"S": "10.0.5.23"},
+      "port": {"N": "3000"},
+      "ttl": {"N": "1738300000"}
+    },
+    {
+      "serviceName": {"S": "orders"},
+      "host": {"S": "10.0.6.15"},
+      "port": {"N": "3001"},
+      "ttl": {"N": "1738300000"}
+    }
+  ]
+}
+```
+
+### Paso 2: Probar routing básico
+
+```bash
+# Usar tu API Gateway URL (de outputs de cdk deploy)
+API_URL="https://ect71idvv2.execute-api.us-east-1.amazonaws.com/dev"
+
+# Probar users service
+curl -i "$API_URL/users/health"
+# Esperado: 200 OK, JSON response
+
+# Probar orders service
+curl -i "$API_URL/orders/orders"
+# Esperado: 200 OK, JSON response
+```
+
+### Paso 3: Verificar logs (CloudWatch)
+
+```bash
+# Lambda Router logs
+aws logs tail /aws/lambda/lambda-router --follow --region us-east-1
+
+# ECS Task logs
+# Logs de microservicios (si envías logs a CloudWatch desde EC2)
+# aws logs tail /ec2/users-service --follow --region us-east-1
+# aws logs tail /ec2/orders-service --follow --region us-east-1
+```
+
+---
+
+## Pruebas (Compatible AWS Academy)
+
+**Nota**: AWS Academy tiene limitaciones de recursos (compute, networking, API calls). Las pruebas están diseñadas para ser **ligeras y funcionales**, no de carga/stress.
+
+### Pruebas Funcionales (Manual)
+
+Estas pruebas verifican que el sistema funciona correctamente sin sobrecargar AWS Academy.
+
+#### 1. Test de Descubrimiento de Servicios
+
+```bash
+# Verificar que servicios están registrados en DynamoDB
+aws dynamodb scan --table-name ServiceRegistry --region us-east-1 --output table
+
+# Esperado: 2 items (users, orders)
+```
+
+**Validación**: ✅ Ambos servicios listados
+
+#### 2. Test de Routing Dinámico
+
+```bash
+API_URL="https://ect71idvv2.execute-api.us-east-1.amazonaws.com/dev"
+
+# Test 1: GET /users/health
+echo "=== Test 1: Users Health ==="
+curl -w "\nHTTP Status: %{http_code}\n" "$API_URL/users/health"
+# Esperado: 200, respuesta JSON
+
+# Test 2: GET /users/list
+echo -e "\n=== Test 2: Users List ==="
+curl -w "\nHTTP Status: %{http_code}\n" "$API_URL/users/list"
+# Esperado: 200, array de usuarios
+
+# Test 3: GET /orders/orders
+echo -e "\n=== Test 3: Orders List ==="
+curl -w "\nHTTP Status: %{http_code}\n" "$API_URL/orders/orders"
+# Esperado: 200, array de órdenes
+```
+
+**Validación**: ✅ Los 3 tests retornan 200 OK
+
+#### 3. Test de Error Handling
+
+```bash
+# Test 4: Servicio no existente
+echo -e "\n=== Test 4: Non-existent Service ==="
+curl -w "\nHTTP Status: %{http_code}\n" "$API_URL/unknown/path"
+# Esperado: 404 o 502 (servicio no existe)
+
+# Test 5: Path inválido
+echo -e "\n=== Test 5: Invalid Path ==="
+curl -w "\nHTTP Status: %{http_code}\n" "$API_URL"
+# Esperado: 404
+```
+
+**Validación**: ✅ Errores manejados correctamente
+
+#### 4. Test de Monitoreo (CloudWatch)
+
+```bash
+# Ver últimos 10 logs del Router
+aws logs get-log-events \
+  --log-group-name /aws/lambda/lambda-router \
+  --log-stream-name <STREAM_NAME> \
+  --limit 10 \
+  --region us-east-1
+
+# Verificar métricas
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/Lambda \
+  --metric-name Invocations \
+  --dimensions Name=FunctionName,Value=lambda-router \
+  --start-time 2024-01-15T00:00:00Z \
+  --end-time 2024-01-15T23:59:59Z \
+  --period 3600 \
+  --statistics Sum \
+  --region us-east-1
+```
+
+**Validación**: ✅ Logs muestran invocaciones exitosas
+
+### Script de Pruebas Automatizadas (Bash)
+
+Ejecuta el script `test.sh` (ya incluido en el repo). Flags opcionales para entornos restringidos (AWS Academy):
+
+- `SKIP_LOGS=true` omite verificación de CloudWatch
+- `SKIP_PERF=true` omite medición de latencia
+
+Ejemplo:
+
+```bash
+#!/bin/bash
+
+API_URL="https://ect71idvv2.execute-api.us-east-1.amazonaws.com/dev"
+PASSED=0
+FAILED=0
+
+test_endpoint() {
+  local name=$1
+  local path=$2
+  local expected_code=$3
+
+  echo "Testing: $name"
+  response=$(curl -s -w "%{http_code}" -o /tmp/response.json "$API_URL$path")
+  http_code="${response: -3}"
+
+  if [ "$http_code" = "$expected_code" ]; then
+    echo "✅ PASS: $name (HTTP $http_code)"
+    ((PASSED++))
+  else
+    echo "❌ FAIL: $name (Expected $expected_code, got $http_code)"
+    ((FAILED++))
+  fi
+  echo ""
+}
+
+echo "=== API Gateway Auto-Discovery Tests ==="
+echo "URL: $API_URL"
+echo ""
+
+test_endpoint "Users Health" "/users/health" "200"
+test_endpoint "Users List" "/users/list" "200"
+test_endpoint "Orders List" "/orders/orders" "200"
+test_endpoint "Non-existent Service" "/unknown/path" "404"
+
+echo "=== Results ==="
+echo "Passed: $PASSED"
+echo "Failed: $FAILED"
+
+if [ $FAILED -eq 0 ]; then
+  exit 0
+else
+  exit 1
+fi
+```
+
+**Ejecutar**:
+```bash
+chmod +x test.sh
+./test.sh
+```
+
+### Matriz de Pruebas
+
+| Prueba | Descripción | Comando | Esperado |
+|--------|-----------|---------|----------|
+| **Descubrimiento** | Servicios en DynamoDB | `aws dynamodb scan --table-name ServiceRegistry` | 2 items |
+| **Health Check** | Endpoint de usuarios | `curl /dev/users/health` | 200 OK |
+| **List Users** | Obtener usuarios | `curl /dev/users/list` | 200 OK + JSON |
+| **List Orders** | Obtener órdenes | `curl /dev/orders/orders` | 200 OK + JSON |
+| **Error 404** | Servicio inexistente | `curl /dev/unknown/path` | 404 |
+| **Logs Lambda** | Verificar router logs | `aws logs tail /aws/lambda/lambda-router` | Invocaciones visibles |
+
+---
+
+## Monitoreo
+
+### CloudWatch Dashboard (Manual)
+
+1. **AWS Console** → CloudWatch → Dashboards
+2. **Crear Dashboard** con:
+
+```json
+{
+  "widgets": [
+    {
+      "type": "metric",
+      "properties": {
+        "metrics": [
+          ["AWS/Lambda", "Invocations", {"stat": "Sum", "label": "Router Invocations"}],
+          ["AWS/Lambda", "Duration", {"stat": "Average", "label": "Router Duration"}],
+          ["AWS/Lambda", "Errors", {"stat": "Sum", "label": "Router Errors"}],
+          ["AWS/DynamoDB", "ConsumedReadCapacityUnits", {"stat": "Sum"}],
+          ["AWS/ECS", "CPUUtilization", {"stat": "Average"}],
+          ["AWS/ECS", "MemoryUtilization", {"stat": "Average"}]
+        ],
+        "period": 300,
+        "stat": "Average",
+        "region": "us-east-1"
+      }
+    }
+  ]
+}
+```
+
+### Métricas Clave
+
+```bash
+# Invocaciones Lambda
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/Lambda \
+  --metric-name Invocations \
+  --dimensions Name=FunctionName,Value=lambda-router \
+  --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 300 \
+  --statistics Sum
+
+# Errores Lambda
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/Lambda \
+  --metric-name Errors \
+  --dimensions Name=FunctionName,Value=lambda-router \
+  --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 300 \
+  --statistics Sum
+```
+
+---
+
+## Resolución de Problemas
+
+### Problema: Servicio no aparece en DynamoDB
+
+**Síntomas**: `aws dynamodb scan --table-name ServiceRegistry` retorna 0 items
+
+**Causas**:
+1. ECS Task no completó startup
+2. Task no pudo conectar a DynamoDB
+3. Security Group restringe conexión
+
+**Solución**:
+```bash
+# 1. Revisar logs del task
+aws logs tail /ecs/users-service --follow --region us-east-1
+
+# 2. Verificar task status
+aws ecs list-tasks --cluster ApiGatewayCluster --region us-east-1
+aws ecs describe-tasks --cluster ApiGatewayCluster \
+  --tasks <TASK_ARN> --region us-east-1
+
+# 3. Reiniciar task
+aws ecs update-service --cluster ApiGatewayCluster \
+  --service users-service --force-new-deployment --region us-east-1
+
+# 4. Esperar 30-60 segundos y verificar nuevamente
+sleep 60
+aws dynamodb scan --table-name ServiceRegistry --region us-east-1
+```
+
+### Problema: API Gateway retorna 502
+
+**Síntomas**: `curl /dev/users/health` → HTTP 502
+
+**Causas**:
+1. Lambda Router no puede alcanzar el servicio
+2. Servicio está down
+3. Security Group restringe tráfico
+
+**Solución**:
+```bash
+# 1. Ver logs del router
+aws logs tail /aws/lambda/lambda-router --follow --region us-east-1
+
+# 2. Verificar que servicio está corriendo
+aws ecs list-tasks --cluster ApiGatewayCluster --serviceName users-service \
+  --region us-east-1
+
+# 3. Verificar IP del servicio en DynamoDB
+aws dynamodb get-item --table-name ServiceRegistry \
+  --key '{"serviceName":{"S":"users"}}' --region us-east-1
+
+# 4. Probar conectividad desde Lambda (si es posible)
+# Intentar manual desde el host del servicio:
+# ssh -i <key> ec2-user@<instance-ip>
+# curl http://10.0.x.x:3000/health
+```
+
+### Problema: Alta latencia
+
+**Síntomas**: Requests toman > 1 segundo
+
+**Causas**:
+1. DynamoDB está throttleado (cuota AWS Academy)
+2. ECS Task CPU/memoria saturada
+3. Network latency
+
+**Solución**:
+```bash
+# Ver duración Lambda
+aws logs insights --log-group-name /aws/lambda/lambda-router \
+  --query-string 'fields @duration | stats avg(@duration) as avg_duration'
+
+# Ver CPU/memoria ECS
+aws ecs describe-services --cluster ApiGatewayCluster \
+  --services users-service orders-service --region us-east-1
+
+# Ver throttling DynamoDB
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/DynamoDB \
+  --metric-name ReadThrottleEvents \
+  --dimensions Name=TableName,Value=ServiceRegistry \
+  --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 300 \
+  --statistics Sum
+```
+
+### Problema: CDK Deploy Falla
+
+**Síntomas**: `cdk deploy --all` → exit code 1
+
+**Causas comunes en AWS Academy**:
+1. Cuota IAM insuficiente
+2. Región no permitida
+3. Permisos faltantes
+
+**Solución**:
+```bash
+# Ver error detallado
+npx cdk deploy --all --verbose
+
+# Probar deploy individual por stack
+npx cdk deploy DynamodbStack
+npx cdk deploy ApiGatewayStack
+npx cdk deploy EcsClusterStack
+
+# Si falla, revisar IAM
+aws iam get-user
+aws iam list-roles
+
+# Si necesita usar un rol específico
+npx cdk deploy --role-arn arn:aws:iam::<ACCOUNT>:role/<ROLE_NAME>
+```
+
+---
+
+## Anexos
+
+### Comandos Útiles
+
+#### Logs
+```bash
+# Tail logs Lambda Router en vivo
+aws logs tail /aws/lambda/lambda-router --follow --region us-east-1
+
+# Últimos 20 logs
+aws logs tail /aws/lambda/lambda-router --max-items 20 --region us-east-1
+
+# Logs ECS Services
+aws logs tail /ecs/users-service --follow --region us-east-1
+aws logs tail /ecs/orders-service --follow --region us-east-1
+```
+
+#### DynamoDB
+```bash
+# Listar todos los servicios registrados
+aws dynamodb scan --table-name ServiceRegistry --region us-east-1
+
+# Buscar servicio específico
+aws dynamodb get-item \
+  --table-name ServiceRegistry \
+  --key '{"serviceName":{"S":"users"}}' \
+  --region us-east-1
+
+# Eliminar registro manual (si es necesario)
+aws dynamodb delete-item \
+  --table-name ServiceRegistry \
+  --key '{"serviceName":{"S":"orders"}}' \
+  --region us-east-1
+```
+
+#### ECS
+```bash
+# Listar tasks corriendo
+aws ecs list-tasks --cluster ApiGatewayCluster --region us-east-1
+
+# Describir task específica
+aws ecs describe-tasks --cluster ApiGatewayCluster --tasks <TASK_ARN> --region us-east-1
+
+# Force redeploy de servicio
+aws ecs update-service --cluster ApiGatewayCluster \
+  --service users-service --force-new-deployment --region us-east-1
+```
+
+#### CloudWatch Metrics
+```bash
+# Ver invocaciones Lambda último 1 hora
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/Lambda \
+  --metric-name Invocations \
+  --dimensions Name=FunctionName,Value=lambda-router \
+  --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 300 \
+  --statistics Sum
+```
+
+### Variables de Entorno
+
+```bash
+# En ~/.zshrc o ~/.bashrc
+export AWS_REGION=us-east-1
+export API_GATEWAY_URL="https://ect71idvv2.execute-api.us-east-1.amazonaws.com/dev"
+export DYNAMODB_TABLE="ServiceRegistry"
+export ECS_CLUSTER="ApiGatewayCluster"
+
+# Ejecutar pruebas (omitir logs si tienes permisos limitados)
+SKIP_LOGS=true ./test.sh
+```
+
+### Estructura de DynamoDB Item
+
 ```json
 {
   "serviceName": "users",
   "host": "10.0.5.23",
   "port": 3000,
-  "ttl": 1738300000
-}
-```
-Pantallazo: `04-dynamodb-registry.png`
-
-4.5 Probar enrutamiento dinámico
-```bash
-curl -i https://<api-id>.execute-api.<region>.amazonaws.com/proxy/users/health
-```
-Respuesta esperada:
-HTTP/1.1 200 OK
-{"status":"ok","service":"users"}
-![](./docs/screenshots/05-curl-health.png)
-
-4.6 Pruebas locales y comprobaciones rápidas
-
-- Probar microservicio `users` localmente (sin Docker):
-```bash
-cd services/users
-npm install
-npm start
-# luego en otra terminal
-curl -i http://localhost:3000/health
-```
-
-- Probar `orders` localmente igual que arriba (puerto 3000 por defecto).
-
-- Probar Router (desplegado en API Gateway):
-```bash
-curl -i https://<api-id>.execute-api.<region>.amazonaws.com/svc/users/health 
-```
-
-- Prueba manual del Router en local (opcional/experimental):
-  - Puedes ejecutar la lambda localmente con herramientas como AWS SAM CLI (`sam local invoke`) o `@aws-lambda-ric`/`aws-lambda-ric` para invocar el handler. Requiere empaquetar event JSON que simule la petición API Gateway.
-
-Ejemplo mínimo de evento (guardar en `event.json`) para invocar la lambda del router desde SAM o `aws lambda invoke`:
-```json
-{
-  "rawPath": "/svc/users/health",
-  "requestContext": { "http": { "method": "GET" } },
-  "headers": { "authorization": "Bearer <token>" }
+  "ttl": 1738300000,
+  "timestamp": "2024-01-15T10:30:45Z",
+  "version": "1.0.0"
 }
 ```
 
-Luego puedes ejecutar (si usas SAM):
-```bash
-sam local invoke LambdaRouter --event event.json
-```
-
-Nota: el router espera que el Service Registry (DynamoDB) ya tenga la entrada del servicio; para pruebas locales puedes saltarte la verificación modificando temporalmente el handler o inyectando una URL de destino conocida.
-
 ---
 
-## 5. Pruebas
-
-- Unitarias
-  - Lambda Router: resolución de rutas, selección de instancia, manejo de errores
-  - Microservicios ECS: endpoints básicos
-  - CDK Assertions: validar recursos y permisos mínimos
-- Integración
-  - Llamadas reales al API Gateway
-  - Verificar registros en DynamoDB
-  - Simular caída de instancia y verificar recuperación
-- E2E
-  - Flujo completo: API Gateway → Router → ECS → Respuesta
-  - Correlación en CloudWatch Logs
-
----
-
-## 6. Monitoreo y Operación
-
-Dashboards recomendados (CloudWatch):
-- Latencia del API Gateway (p95/p99)
-- 4xx y 5xx errors
-- Lambda Router: invocations, duration, errors, throttles
-- ECS: CPU y memory por servicio
-- DynamoDB: consumed RCU/WCU, throttling
-
-Alarmas sugeridas:
-- Lambda Router errors > 1%
-- ECS tasks < desiredCount
-- Latencia p95 > 1s
-- DynamoDB throttling
-
-![](./docs/screenshots/06-cloudwatch-dashboard.png)
-
----
-
-## 7. Seguridad y Buenas Prácticas
-
-- IAM Least Privilege para Lambdas y ECS tasks.
-- Secrets en Parameter Store o Secrets Manager.
-- HTTPS obligatorio (API Gateway por defecto).
-- Validación estricta de entradas en el Router.
-- CORS restringido según origenes permitidos.
-- Security Groups mínimos (solo puertos necesarios).
-- Registrar eventos críticos en CloudWatch Logs.
-
----
-
-## 8. Runbooks
-
-Problema: servicio no aparece en DynamoDB
-- Revisar logs del ECS task (CloudWatch).
-- Confirmar que el service pudo llamar el endpoint /register.
-- Revisar Security Groups o IAM.
-- Registrar manualmente un item para pruebas.
-
-Problema: alta latencia
-- Revisar duración de Lambda Router.
-- Ver congestión en ECS (CPU/memory).
-- Confirmar cacheo de resoluciones en Router.
-- Ajustar ASG / políticas de escalado.
-
-Problema: API Gateway retorna 502
-- Ver logs del Router en CloudWatch.
-- Verificar backend (ECS task) está corriendo.
-- Validar que la URL del servicio es alcanzable desde Lambda.
-- Revisar TTL de registros en DynamoDB.
-
----
-
-## 9. Anexos — Comandos útiles
-
-Logs Lambda Router:
-```bash
-aws logs tail /aws/lambda/lambda-router --follow
-```
-Listar tasks ECS:
-```bash
-aws ecs list-tasks --cluster ApiGatewayCluster
-```
-Ver ASG:
-```bash
-aws autoscaling describe-auto-scaling-groups
-```
-
----
-
-## 10. Licencia
+## Licencia
 
 MIT
+
+---
+
+**Última actualización**: Enero 2024
+
+Para preguntas o issues, revisar la documentación de AWS CDK: https://docs.aws.amazon.com/cdk/
