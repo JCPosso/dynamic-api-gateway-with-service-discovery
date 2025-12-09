@@ -84,12 +84,12 @@ export class Ec2ServiceStack extends Stack {
       cd /home/ec2-user
       rm -rf repo
       git clone ${props.gitRepoUrl} repo
-      cd repo/${props.serviceDirectory}
+      cd repo/services
 
       npm install --production
 
-      # Build and run Docker container
-      docker build -t ${props.serviceName} .
+      # Build and run Docker container from services directory
+      docker build -t ${props.serviceName} -f ${props.serviceDirectory}/Dockerfile .
       docker run -d --restart unless-stopped --name ${props.serviceName} \
         -p ${props.servicePort}:${props.servicePort} \
         -e DYNAMODB_TABLE=${props.serviceRegistryTable.tableName} \

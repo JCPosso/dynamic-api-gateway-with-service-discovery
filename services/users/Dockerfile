@@ -1,7 +1,8 @@
 FROM node:18-alpine
 WORKDIR /app
-COPY package*.json ./
+COPY users/package*.json ./
 RUN npm install --production
-COPY . .
+COPY registerIp.js ./
+COPY users/app.js ./
 EXPOSE 3000
 CMD ["node", "app.js"]
