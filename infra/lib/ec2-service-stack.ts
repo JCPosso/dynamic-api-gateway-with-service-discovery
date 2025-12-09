@@ -31,10 +31,19 @@ export class Ec2ServiceStack extends Stack {
       allowAllOutbound: true,
     });
 
+    // Security: Solo permitir tráfico desde la VPC (Lambda está en la VPC)
+    // No exponer directamente a Internet (ANY IPv4)
+    securityGroup.addIngressRule(
+      ec2.Peer.ipv4(vpc.vpcCidrBlock),  // Solo desde VPC interna
+      ec2.Port.tcp(props.servicePort),
+      `Allow port ${props.servicePort} from VPC only`
+    );
+
+    // Opcional: Permitir SSH solo para debugging (comentar en producción)
     securityGroup.addIngressRule(
       ec2.Peer.anyIpv4(),
-      ec2.Port.tcp(props.servicePort),
-      `Allow port ${props.servicePort}`
+      ec2.Port.tcp(22),
+      "SSH for debugging (remove in production)"
     );
 
     // Rol proporcionado por AWS Academy

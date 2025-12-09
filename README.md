@@ -399,6 +399,33 @@ chmod +x test.sh
 | **Logs Lambda** | Verificar router logs | `aws logs tail /aws/lambda/lambda-router` | Invocaciones visibles |
 
 ---
+### Stress Tests
+
+El proyecto incluye stress tests completos para validar rendimiento bajo carga:
+
+```bash
+chmod +x stress-test.sh
+API_URL="https://<api-id>.execute-api.us-east-1.amazonaws.com/dev" ./stress-test.sh
+```
+
+**Tests incluidos:**
+1. ✅ Baseline (latencia individual)
+2. ✅ Carga baja (50 requests, 5 concurrent)
+3. ✅ Carga media (100 requests, 10 concurrent)
+4. ✅ Multi-service routing (users + orders)
+5. ✅ Sustained load (200 requests sostenidos)
+6. ✅ DynamoDB query performance
+
+**Requisitos:**
+- Apache Bench (`ab`) - incluido en macOS, o instalar con `brew install httpd`
+- AWS CLI configurado
+- API URL del deployment
+
+**Métricas validadas:**
+- Performance: Latencia P50, P95, P99
+- Scalability: Throughput (req/s)
+- Reliability: Error rate
+- Availability: Uptime durante carga
 
 ## Monitoreo
 
