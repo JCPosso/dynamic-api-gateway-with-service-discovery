@@ -20,7 +20,25 @@ set -e
 # Configuration
 API_URL="${API_URL:-}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
-DYNAMODB_TABLE="${DYNAMODB_TABLE:-ServiceRegistryStack-ServiceRegistryC10B6608-D2AX099FCN8Y}"
+DYNAMODB_TABLE="${DYNAMODB_TABLE:-}"
+
+# If DYNAMODB_TABLE is not provided, try to retrieve it from CloudFormation
+if [ -z "$DYNAMODB_TABLE" ]; then
+  echo "⚠️  DYNAMODB_TABLE not set. Trying to auto-detect from CloudFormation..."
+  DYNAMODB_TABLE=$(aws cloudformation describe-stacks \
+    --stack-name ServiceRegistryStack \
+    --region $AWS_REGION \
+    --query 'Stacks[0].Outputs[?OutputKey==`TableName`].OutputValue' \
+    --output text 2>/dev/null || echo "")
+  
+  if [ -z "$DYNAMODB_TABLE" ]; then
+    echo "❌ Could not auto-detect DYNAMODB_TABLE. Please provide it:"
+    echo "   export DYNAMODB_TABLE=<your-table-name>"
+    echo "   ./test.sh"
+    exit 1
+  fi
+  echo "✅ Auto-detected DYNAMODB_TABLE: $DYNAMODB_TABLE"
+fi
 
 # Optional skips for constrained environments
 SKIP_LOGS="${SKIP_LOGS:-false}"      # Skip CloudWatch log checks
