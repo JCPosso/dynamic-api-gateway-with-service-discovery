@@ -2,11 +2,10 @@ import { Stack, StackProps, Duration } from "aws-cdk-lib";
 import { Construct } from "constructs";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as iam from "aws-cdk-lib/aws-iam";
-import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as path from "path";
 
 interface LambdaRouterStackProps extends StackProps {
-  serviceRegistryTable: dynamodb.Table;
+  serviceRegistryTableName: string;
 }
 
 export class LambdaRouterStack extends Stack {
@@ -15,7 +14,7 @@ export class LambdaRouterStack extends Stack {
   constructor(scope: Construct, id: string, props: LambdaRouterStackProps) {
     super(scope, id, props);
 
-    const { serviceRegistryTable } = props;
+    const { serviceRegistryTableName } = props;
 
     // Usar el rol LabRole existente en lugar de crear uno nuevo
     const lambdaRole = iam.Role.fromRoleArn(
@@ -32,7 +31,7 @@ export class LambdaRouterStack extends Stack {
       code: lambda.Code.fromAsset(path.join(__dirname, "../../lambdas/router")),
       role: lambdaRole,
       environment: {
-        SERVICE_REGISTRY_TABLE: serviceRegistryTable.tableName,
+        SERVICE_REGISTRY_TABLE: serviceRegistryTableName,
       },
     });
   }

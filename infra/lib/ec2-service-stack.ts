@@ -3,7 +3,6 @@ import {
   StackProps,
   aws_ec2 as ec2,
   aws_iam as iam,
-  aws_dynamodb as dynamodb,
 } from "aws-cdk-lib";
 import { Construct } from "constructs";
 
@@ -11,7 +10,7 @@ interface Ec2ServiceStackProps extends StackProps {
   serviceName: string;
   serviceDirectory: string;
   servicePort: number;
-  serviceRegistryTable: dynamodb.Table;
+  dynamoDbTableName: string;
   gitRepoUrl: string;
 }
 
@@ -92,7 +91,7 @@ export class Ec2ServiceStack extends Stack {
       docker build -t ${props.serviceName} -f ${props.serviceDirectory}/Dockerfile .
       docker run -d --restart unless-stopped --name ${props.serviceName} \
         -p ${props.servicePort}:${props.servicePort} \
-        -e DYNAMODB_TABLE=${props.serviceRegistryTable.tableName} \
+        -e DYNAMODB_TABLE=${props.dynamoDbTableName} \
         -e AWS_DEFAULT_REGION=${this.region} \
         -e PORT=${props.servicePort} \
         ${props.serviceName}
