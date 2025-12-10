@@ -35,6 +35,11 @@ yarn-error.log*
 /infra/cdk.out/
 /infra/dist/
 
+# TypeScript compiled files
+/infra/**/*.js
+/infra/**/*.d.ts
+!/infra/node_modules/**
+
 # Workspace / monorepo
 **/node_modules
 **/dist
