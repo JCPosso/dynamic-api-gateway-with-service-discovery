@@ -1,9 +1,20 @@
-const AWS = require("aws-sdk");
-const dynamo = new AWS.DynamoDB.DocumentClient();
+const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
+const { DynamoDBDocumentClient, QueryCommand } = require("@aws-sdk/lib-dynamodb");
 const https = require("https");
 const http = require("http");
 
+const client = new DynamoDBClient({});
+const dynamo = DynamoDBDocumentClient.from(client);
+
 const TABLE = process.env.SERVICE_REGISTRY_TABLE;
+
+// =====================================================================
+// LOAD BALANCER STATE (persiste entre invocaciones warm)
+// =====================================================================
+const loadBalancerState = {
+  roundRobinCounters: {}, // { "users": 0, "orders": 0 }
+  activeConnections: {},  // { "i-abc123": 2, "i-def456": 1 }
+};
 
 // =====================================================================
 // Helper: hacer request sin certificados (ECS interno IPv4)
@@ -29,6 +40,55 @@ function httpRequest(options, body) {
     if (body) req.write(body);
     req.end();
   });
+}
+
+// =====================================================================
+// OBTENER TODAS LAS INSTANCIAS DE UN SERVICIO
+// =====================================================================
+async function getAllInstances(serviceName) {
+  const result = await dynamo.send(new QueryCommand({
+    TableName: TABLE,
+    KeyConditionExpression: "serviceName = :serviceName",
+    ExpressionAttributeValues: {
+      ":serviceName": serviceName,
+    },
+  }));
+
+  if (!result.Items || result.Items.length === 0) {
+    throw new Error(`Service ${serviceName} not found in registry`);
+  }
+
+  console.log(`Found ${result.Items.length} instance(s) for ${serviceName}`);
+
+  // Retornar array de instancias
+  return result.Items.map(item => ({
+    instanceId: item.instanceId,
+    host: item.host || item.ip, // Soportar ambos nombres
+    port: item.port || 3000,
+    weight: item.weight || 1,
+    metadata: item.metadata || {},
+  }));
+}
+
+// =====================================================================
+// ROUND ROBIN: Seleccionar instancia
+// =====================================================================
+function selectInstanceRoundRobin(serviceName, instances) {
+  // Inicializar contador si no existe
+  if (!loadBalancerState.roundRobinCounters[serviceName]) {
+    loadBalancerState.roundRobinCounters[serviceName] = 0;
+  }
+
+  // Seleccionar instancia
+  const counter = loadBalancerState.roundRobinCounters[serviceName];
+  const selectedInstance = instances[counter % instances.length];
+
+  // Incrementar contador
+  loadBalancerState.roundRobinCounters[serviceName]++;
+
+  console.log(`[Round Robin] Service: ${serviceName}, Selected: ${selectedInstance.instanceId} (${selectedInstance.host}:${selectedInstance.port}), Counter: ${counter}`);
+
+  return selectedInstance;
 }
 
 // =====================================================================
@@ -60,65 +120,23 @@ exports.main = async (event) => {
     console.log(`Relative path: ${relativePath}`);
 
     // -----------------------------------------------------------------
-    // 2. Buscar el servicio en DynamoDB
+    // 2. Obtener TODAS las instancias del servicio (para Load Balancing)
     // -----------------------------------------------------------------
-    const res = await dynamo
-      .get({
-        TableName: TABLE,
-        Key: { serviceName },
-      })
-      .promise();
-
-    if (!res.Item) {
-      return {
-        statusCode: 404,
-        body: `Service ${serviceName} not found in registry`,
-      };
-    }
+    const instances = await getAllInstances(serviceName);
 
     // -----------------------------------------------------------------
-    // 3. Enrutamiento: si hay functionArn -> invocar Lambda, si hay IP -> HTTP
+    // 3. Seleccionar instancia usando Round Robin
     // -----------------------------------------------------------------
-    if (res.Item.functionArn) {
-      const lambdaPayload = {
-        path: relativePath,
-        rawPath: relativePath,
-        httpMethod: event.requestContext.http.method,
-        headers: sanitizeHeaders(event.headers),
-        body: event.body,
-        isBase64Encoded: event.isBase64Encoded,
-        queryStringParameters: event.queryStringParameters || {},
-      };
+    const selectedInstance = selectInstanceRoundRobin(serviceName, instances);
 
-      const invokeRes = await new AWS.Lambda()
-        .invoke({
-          FunctionName: res.Item.functionArn,
-          InvocationType: "RequestResponse",
-          Payload: JSON.stringify(lambdaPayload),
-        })
-        .promise();
+    const { host, port, instanceId } = selectedInstance;
+    console.log(`Selected instance: ${instanceId} at ${host}:${port}`);
 
-      const payload = JSON.parse(invokeRes.Payload || "{}");
-      return {
-        statusCode: payload.statusCode || 502,
-        headers: payload.headers || {},
-        body: payload.body || "",
-      };
-    }
-
-    const { ip } = res.Item;
-    if (!ip) {
-      return {
-        statusCode: 503,
-        body: `Service ${serviceName} has no IP registered`,
-      };
-    }
-
-    const port = serviceName === "users" ? 3000 : 3001;
-    console.log("Resolved IP:", ip, "port:", port);
-
+    // -----------------------------------------------------------------
+    // 4. Construir request al servicio seleccionado
+    // -----------------------------------------------------------------
     const options = {
-      hostname: ip,
+      hostname: host,
       port,
       path: relativePath + (event.rawQueryString || event.queryStringParameters ? `?${event.rawQueryString || new URLSearchParams(event.queryStringParameters || {}).toString()}` : ""),
       method: event.httpMethod || (event.requestContext && event.requestContext.http && event.requestContext.http.method) || "GET",
@@ -134,12 +152,54 @@ exports.main = async (event) => {
 
     console.log("Proxying with options:", options);
 
+    // Track active connection
+    const connectionKey = instanceId;
+    loadBalancerState.activeConnections[connectionKey] = 
+      (loadBalancerState.activeConnections[connectionKey] || 0) + 1;
+
+    const startTime = Date.now();
+
+    // -----------------------------------------------------------------
+    // 5. Hacer request HTTP al servicio
+    // -----------------------------------------------------------------
     const response = await httpRequest(options, body);
+
+    const latency = Date.now() - startTime;
+
+    // Release connection
+    loadBalancerState.activeConnections[connectionKey]--;
+
+    console.log(`Response from ${instanceId}: ${response.statusCode} (${latency}ms)`);
+
+    // -----------------------------------------------------------------
+    // 6. Retornar respuesta con metadata de load balancing
+    // -----------------------------------------------------------------
+    let responseBody = response.body;
+    
+    // Si es JSON, agregar metadata de load balancer
+    try {
+      const jsonBody = JSON.parse(response.body);
+      jsonBody._loadBalancer = {
+        selectedInstance: instanceId,
+        algorithm: "round-robin",
+        latency: `${latency}ms`,
+        totalInstances: instances.length,
+        host: `${host}:${port}`,
+      };
+      responseBody = JSON.stringify(jsonBody);
+    } catch (e) {
+      // No es JSON, dejar body original
+    }
 
     return {
       statusCode: response.statusCode,
-      headers: filterResponseHeaders(response.headers),
-      body: response.body,
+      headers: {
+        ...filterResponseHeaders(response.headers),
+        "X-Selected-Instance": instanceId,
+        "X-Load-Balancer": "lambda-round-robin",
+        "X-Total-Instances": instances.length.toString(),
+      },
+      body: responseBody,
     };
   } catch (err) {
     console.error("ERROR:", err);

@@ -13,7 +13,8 @@
 7. [Pruebas (Compatible AWS Academy)](#pruebas-compatible-aws-academy)
 8. [Monitoreo](#monitoreo)
 9. [Resolución de Problemas](#resolución-de-problemas)
-10. [Anexos](#anexos)
+10. [Trade-offs: AWS Academy vs Producción](#trade-offs-aws-academy-vs-producción)
+11. [Anexos](#anexos)
 
 ---
 
@@ -685,12 +686,523 @@ SKIP_LOGS=true SKIP_API=true ./test.sh
 
 ---
 
+## Trade-offs: AWS Academy vs Producción
+
+### 🎓 Limitaciones del Prototipo (AWS Academy)
+
+Este prototipo está **optimizado para AWS Academy**, que tiene restricciones de recursos, permisos y costos. A continuación se documentan las decisiones de diseño y cómo se implementarían en un entorno de producción real.
+
+---
+
+### 1️⃣ **Availability & Reliability**
+
+#### ❌ **Prototipo AWS Academy**
+```typescript
+// ec2-service-stack.ts
+this.instance = new ec2.Instance(this, `${props.serviceName}Instance`, {
+  vpc,
+  instanceType: ec2.InstanceType.of(
+    ec2.InstanceClass.T3,
+    ec2.InstanceSize.MICRO
+  ),
+  vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+});
+```
+
+**Limitaciones:**
+- ⚠️ **Single Point of Failure (SPOF)**: 1 instancia EC2 por servicio
+- ⚠️ **No Multi-AZ**: Todas las instancias en una sola Availability Zone
+- ⚠️ **Sin redundancia**: Si la instancia falla, el servicio está down hasta que se recupere
+- ⚠️ **Health checks manuales**: Dependemos de TTL en DynamoDB para limpiar servicios caídos
+
+**Razón:** AWS Academy limita:
+- Número de instancias EC2 simultáneas
+- Uso de Auto Scaling Groups
+- Despliegue en múltiples AZs
+
+#### ✅ **Arquitectura de Producción**
+
+```typescript
+// production-service-stack.ts (conceptual)
+const targetGroup = new elbv2.ApplicationTargetGroup(this, 'ServiceTG', {
+  vpc,
+  port: props.servicePort,
+  protocol: elbv2.ApplicationProtocol.HTTP,
+  healthCheck: {
+    path: '/health',
+    interval: Duration.seconds(30),
+    timeout: Duration.seconds(5),
+    healthyThresholdCount: 2,
+    unhealthyThresholdCount: 3,
+  },
+});
+
+const asg = new autoscaling.AutoScalingGroup(this, 'ServiceASG', {
+  vpc,
+  instanceType: ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.SMALL),
+  machineImage: ami,
+  minCapacity: 2,    // Mínimo 2 instancias
+  maxCapacity: 10,   // Escalado hasta 10
+  vpcSubnets: {
+    subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+    availabilityZones: ['us-east-1a', 'us-east-1b', 'us-east-1c'], // Multi-AZ
+  },
+  healthCheck: autoscaling.HealthCheck.elb({ grace: Duration.seconds(60) }),
+});
+
+asg.scaleOnCpuUtilization('CpuScaling', {
+  targetUtilizationPercent: 70,
+});
+
+const alb = new elbv2.ApplicationLoadBalancer(this, 'ServiceALB', {
+  vpc,
+  internetFacing: false,  // Interno (VPC privado)
+  vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+});
+
+alb.addListener('HttpListener', {
+  port: 80,
+  defaultTargetGroups: [targetGroup],
+});
+
+targetGroup.addTarget(asg);
+```
+
+**Mejoras en Producción:**
+- ✅ **Application Load Balancer**: Distribuye tráfico entre instancias sanas
+- ✅ **Auto Scaling Group**: Escala automáticamente de 2 a 10 instancias según CPU
+- ✅ **Multi-AZ**: Instancias distribuidas en 3 Availability Zones
+- ✅ **Health Checks**: ELB retira automáticamente instancias no saludables
+- ✅ **Private Subnets**: Instancias no expuestas directamente a Internet
+
+---
+
+### 2️⃣ **Security**
+
+#### ❌ **Prototipo AWS Academy**
+```typescript
+// ec2-service-stack.ts
+securityGroup.addIngressRule(
+  ec2.Peer.ipv4(vpc.vpcCidrBlock),  // Solo VPC
+  ec2.Port.tcp(props.servicePort),
+  `Allow port ${props.servicePort} from VPC only`
+);
+
+// SSH abierto (debugging)
+securityGroup.addIngressRule(
+  ec2.Peer.anyIpv4(),  // ⚠️ 0.0.0.0/0
+  ec2.Port.tcp(22),
+  "SSH for debugging (remove in production)"
+);
+
+// Usa LabRole existente
+const role = iam.Role.fromRoleArn(
+  this,
+  `${props.serviceName}InstanceRole`,
+  "arn:aws:iam::646981656470:role/LabRole"
+);
+```
+
+**Vulnerabilidades:**
+- ⚠️ **SSH abierto a Internet** (0.0.0.0/0): Expuesto a ataques de fuerza bruta
+- ⚠️ **HTTP sin cifrar**: Comunicación interna en texto plano
+- ⚠️ **LabRole con permisos amplios**: Principio de menor privilegio no aplicado
+- ⚠️ **Sin API Key en API Gateway**: Cualquiera puede invocar el endpoint público
+- ⚠️ **Sin WAF**: No hay protección contra DDoS, SQL injection, etc.
+
+**Razón:** AWS Academy:
+- No permite crear roles IAM personalizados
+- No permite AWS WAF
+- Acceso SSH necesario para debugging sin VPN
+
+#### ✅ **Arquitectura de Producción**
+
+```typescript
+// production-service-stack.ts (conceptual)
+
+// 1. Bastion Host en subnet pública (único punto de acceso SSH)
+const bastionSG = new ec2.SecurityGroup(this, 'BastionSG', {
+  vpc,
+  description: 'Bastion Host SSH access',
+});
+bastionSG.addIngressRule(
+  ec2.Peer.ipv4('203.0.113.0/24'),  // Solo IP corporativa
+  ec2.Port.tcp(22),
+  'SSH from corporate network only'
+);
+
+// 2. Instancias de servicio: NO exponen SSH directamente
+const serviceSG = new ec2.SecurityGroup(this, 'ServiceSG', {
+  vpc,
+});
+serviceSG.addIngressRule(
+  ec2.Peer.securityGroupId(albSG.securityGroupId),  // Solo ALB
+  ec2.Port.tcp(props.servicePort),
+  'Allow HTTPS from ALB only'
+);
+serviceSG.addIngressRule(
+  ec2.Peer.securityGroupId(bastionSG.securityGroupId),  // Solo Bastion
+  ec2.Port.tcp(22),
+  'SSH from Bastion only'
+);
+
+// 3. Rol IAM con permisos mínimos
+const serviceRole = new iam.Role(this, 'ServiceRole', {
+  assumedBy: new iam.ServicePrincipal('ec2.amazonaws.com'),
+  managedPolicies: [
+    iam.ManagedPolicy.fromAwsManagedPolicyName('CloudWatchAgentServerPolicy'),
+  ],
+});
+
+serviceRole.addToPolicy(new iam.PolicyStatement({
+  actions: ['dynamodb:PutItem', 'dynamodb:UpdateItem'],
+  resources: [props.dynamoDbTableArn],
+  conditions: {
+    'ForAllValues:StringEquals': {
+      'dynamodb:LeadingKeys': [props.serviceName],  // Solo su propio registro
+    },
+  },
+}));
+
+// 4. HTTPS interno (ALB → Instances)
+const certificate = new acm.Certificate(this, 'Certificate', {
+  domainName: '*.internal.company.com',
+  validation: acm.CertificateValidation.fromDns(),
+});
+
+alb.addListener('HttpsListener', {
+  port: 443,
+  protocol: elbv2.ApplicationProtocol.HTTPS,
+  certificates: [certificate],
+  defaultTargetGroups: [targetGroup],
+});
+
+// 5. API Gateway con autenticación
+const apiKey = new apigateway.ApiKey(this, 'ApiKey', {
+  description: 'API key for external clients',
+});
+
+const usagePlan = new apigateway.UsagePlan(this, 'UsagePlan', {
+  throttle: { rateLimit: 1000, burstLimit: 2000 },
+  quota: { limit: 1000000, period: apigateway.Period.MONTH },
+});
+usagePlan.addApiKey(apiKey);
+
+// 6. WAF para protección DDoS
+const webAcl = new wafv2.CfnWebACL(this, 'WebAcl', {
+  scope: 'REGIONAL',
+  defaultAction: { allow: {} },
+  rules: [
+    {
+      name: 'RateLimitRule',
+      priority: 1,
+      statement: {
+        rateBasedStatement: {
+          limit: 2000,
+          aggregateKeyType: 'IP',
+        },
+      },
+      action: { block: {} },
+      visibilityConfig: {
+        sampledRequestsEnabled: true,
+        cloudWatchMetricsEnabled: true,
+        metricName: 'RateLimitRule',
+      },
+    },
+  ],
+  visibilityConfig: {
+    sampledRequestsEnabled: true,
+    cloudWatchMetricsEnabled: true,
+    metricName: 'WebAcl',
+  },
+});
+```
+
+**Mejoras en Producción:**
+- ✅ **Bastion Host**: Único punto de acceso SSH desde red corporativa
+- ✅ **HTTPS end-to-end**: ALB → Instances cifrado con TLS 1.3
+- ✅ **IAM Least Privilege**: Rol con permisos específicos por servicio
+- ✅ **API Key + Usage Plans**: Control de acceso y rate limiting por cliente
+- ✅ **AWS WAF**: Protección contra DDoS, bots, SQL injection
+- ✅ **Private Subnets**: Instancias sin IP pública
+
+---
+
+### 3️⃣ **Performance & Scalability**
+
+#### ❌ **Prototipo AWS Academy**
+```typescript
+// api-gateway-stack.ts
+deployOptions: {
+  stageName: "dev",
+  throttlingRateLimit: 20,      // ⚠️ Solo 20 req/s
+  throttlingBurstLimit: 40,     // ⚠️ Solo 40 burst
+}
+
+// lambda-router-stack.ts
+this.routerLambda = new lambda.Function(this, "RouterLambda", {
+  runtime: lambda.Runtime.NODEJS_18_X,
+  timeout: Duration.seconds(10),
+  memorySize: 256,               // ⚠️ Bajo para producción
+  // Sin VPC: cold start rápido pero sin caché de conexiones
+});
+
+// dynamodb-stack.ts
+billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,  // ⚠️ Sin capacity planning
+```
+
+**Limitaciones:**
+- ⚠️ **Throttling bajo**: 20 req/s vs 10,000 req/s en producción
+- ⚠️ **Sin caché**: Cada request consulta DynamoDB (latencia adicional)
+- ⚠️ **Lambda fuera de VPC**: No puede reutilizar conexiones HTTP (conexión nueva cada vez)
+- ⚠️ **DynamoDB On-Demand**: Más caro y menos predecible que provisioned capacity
+- ⚠️ **Sin CDN**: Todo el tráfico va directo al API Gateway
+
+**Razón:** AWS Academy:
+- Límites de throughput
+- Costos ($$$)
+- Simplicidad de configuración
+
+#### ✅ **Arquitectura de Producción**
+
+```typescript
+// production-api-gateway-stack.ts
+const api = new apigateway.RestApi(this, 'Api', {
+  deployOptions: {
+    stageName: 'prod',
+    throttlingRateLimit: 10000,   // 10k req/s
+    throttlingBurstLimit: 20000,  // 20k burst
+    cachingEnabled: true,
+    cacheClusterEnabled: true,
+    cacheClusterSize: '1.6',      // 1.6 GB caché
+    cacheTtl: Duration.minutes(5),
+  },
+});
+
+// Lambda en VPC con conexiones reutilizables
+const routerLambda = new lambda.Function(this, 'RouterLambda', {
+  vpc,
+  vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+  memorySize: 1024,               // Más memoria = más CPU
+  timeout: Duration.seconds(30),
+  reservedConcurrentExecutions: 100,  // Garantiza capacidad
+  environment: {
+    DYNAMODB_ENDPOINT: `https://dynamodb.${this.region}.amazonaws.com`,
+    NODE_OPTIONS: '--enable-source-maps --max-old-space-size=900',
+  },
+});
+
+// DynamoDB con DAX (caché)
+const daxCluster = new dax.CfnCluster(this, 'DaxCluster', {
+  iamRoleArn: daxRole.roleArn,
+  nodeType: 'dax.t3.small',
+  replicationFactor: 3,           // 3 nodos para HA
+  subnetGroupName: daxSubnetGroup.ref,
+});
+
+// DynamoDB con provisioned capacity
+const table = new dynamodb.Table(this, 'ServiceRegistry', {
+  partitionKey: { name: 'serviceName', type: dynamodb.AttributeType.STRING },
+  billingMode: dynamodb.BillingMode.PROVISIONED,
+  readCapacity: 100,              // 100 RCU baseline
+  writeCapacity: 10,              // 10 WCU baseline
+  pointInTimeRecovery: true,
+});
+
+table.autoScaleReadCapacity({ minCapacity: 100, maxCapacity: 1000 })
+  .scaleOnUtilization({ targetUtilizationPercent: 70 });
+
+// CloudFront CDN (opcional para APIs públicas)
+const distribution = new cloudfront.Distribution(this, 'Distribution', {
+  defaultBehavior: {
+    origin: new origins.RestApiOrigin(api),
+    cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
+    allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
+  },
+  priceClass: cloudfront.PriceClass.PRICE_CLASS_100,  // USA, Europa
+});
+```
+
+**Mejoras en Producción:**
+- ✅ **API Gateway Cache**: Reduce latencia (5 min TTL) y costo de Lambda
+- ✅ **DynamoDB DAX**: Caché en memoria (microsegundos vs milisegundos)
+- ✅ **Lambda en VPC**: Reutiliza conexiones HTTP (connection pooling)
+- ✅ **Reserved Concurrency**: Garantiza capacidad durante picos
+- ✅ **Provisioned Capacity + Auto Scaling**: DynamoDB predecible y económico
+- ✅ **CloudFront CDN**: Cachea respuestas en edge locations globales
+
+**Comparación de latencia:**
+
+| Componente | AWS Academy | Producción | Mejora |
+|-----------|-------------|------------|--------|
+| API Gateway | ~50ms | ~10ms (caché) | **5x** |
+| Lambda Cold Start | ~300ms | ~150ms (VPC optimizado) | **2x** |
+| DynamoDB | ~10ms | ~1ms (DAX) | **10x** |
+| **Total (P50)** | **~360ms** | **~160ms** | **2.2x** |
+
+---
+
+### 4️⃣ **Observability & Monitoring**
+
+#### ❌ **Prototipo AWS Academy**
+```typescript
+// Sin configuración explícita de métricas/alarmas
+// Solo logs básicos en CloudWatch
+```
+
+**Limitaciones:**
+- ⚠️ **Sin alarmas**: No hay notificaciones de errores o latencia alta
+- ⚠️ **Sin tracing distribuido**: Difícil debuggear requests multi-servicio
+- ⚠️ **Sin métricas custom**: Solo métricas básicas de AWS
+- ⚠️ **Logs sin estructura**: Difícil de analizar (no JSON)
+
+#### ✅ **Arquitectura de Producción**
+
+```typescript
+// X-Ray tracing
+const routerLambda = new lambda.Function(this, 'RouterLambda', {
+  tracing: lambda.Tracing.ACTIVE,  // X-Ray habilitado
+});
+
+// CloudWatch Logs Insights
+const logGroup = new logs.LogGroup(this, 'RouterLogs', {
+  retention: logs.RetentionDays.ONE_MONTH,
+});
+
+// Alarmas SNS
+const alarmTopic = new sns.Topic(this, 'AlarmTopic');
+alarmTopic.addSubscription(new subscriptions.EmailSubscription('ops@company.com'));
+
+// Alarma: Errores Lambda > 5%
+new cloudwatch.Alarm(this, 'LambdaErrorAlarm', {
+  metric: routerLambda.metricErrors({ statistic: 'avg', period: Duration.minutes(5) }),
+  threshold: 5,
+  evaluationPeriods: 2,
+  alarmDescription: 'Lambda error rate > 5%',
+  actionsEnabled: true,
+});
+alarmTopic.addSubscription(new cloudwatch_actions.SnsAction(alarmTopic));
+
+// Alarma: Latencia P99 > 1s
+new cloudwatch.Alarm(this, 'LatencyAlarm', {
+  metric: routerLambda.metricDuration({ statistic: 'p99', period: Duration.minutes(5) }),
+  threshold: 1000,
+  evaluationPeriods: 2,
+});
+
+// Dashboard
+const dashboard = new cloudwatch.Dashboard(this, 'Dashboard', {
+  dashboardName: 'ServiceDiscoveryMetrics',
+});
+dashboard.addWidgets(
+  new cloudwatch.GraphWidget({
+    title: 'Lambda Invocations',
+    left: [routerLambda.metricInvocations()],
+  }),
+  new cloudwatch.GraphWidget({
+    title: 'DynamoDB Throttles',
+    left: [table.metricUserErrors()],
+  }),
+);
+```
+
+**Mejoras en Producción:**
+- ✅ **AWS X-Ray**: Tracing distribuido (Lambda → DynamoDB → EC2)
+- ✅ **CloudWatch Alarms**: Notificaciones automáticas por SNS/email/Slack
+- ✅ **Structured Logging**: JSON logs para Logs Insights queries
+- ✅ **Custom Metrics**: Métricas de negocio (ej: servicios registrados/activos)
+- ✅ **Dashboards**: Visualización en tiempo real de SLIs/SLOs
+
+---
+
+### 5️⃣ **Cost Optimization**
+
+#### ❌ **Prototipo AWS Academy**
+- ✅ **T3.micro (free tier)**: Costo mínimo
+- ⚠️ **DynamoDB On-Demand**: Más caro que provisioned
+- ⚠️ **Instancias corriendo 24/7**: No hay shutdown automático
+
+#### ✅ **Arquitectura de Producción**
+```typescript
+// Spot Instances para desarrollo
+const asg = new autoscaling.AutoScalingGroup(this, 'ServiceASG', {
+  spotPrice: '0.01',  // Hasta 90% descuento
+  instanceType: ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.SMALL),
+});
+
+// Lambda SnapStart (Java/Python)
+const lambda = new lambda.Function(this, 'Router', {
+  snapStart: lambda.SnapStartConf.ON_PUBLISHED_VERSIONS,  // Reduce cold starts
+});
+
+// S3 Intelligent-Tiering para logs
+const logsBucket = new s3.Bucket(this, 'LogsBucket', {
+  lifecycleRules: [
+    {
+      transitions: [
+        { storageClass: s3.StorageClass.INTELLIGENT_TIERING, transitionAfter: Duration.days(30) },
+        { storageClass: s3.StorageClass.GLACIER, transitionAfter: Duration.days(90) },
+      ],
+    },
+  ],
+});
+
+// Compute Savings Plans
+// (Requiere compromiso de 1-3 años, hasta 72% descuento)
+```
+
+**Ahorro estimado mensual (producción pequeña):**
+- DynamoDB: PAY_PER_REQUEST ($125) → Provisioned ($25) = **$100**
+- EC2: On-Demand ($73) → Spot ($7) = **$66**
+- Lambda: Sin optimización ($50) → Provisioned Concurrency ($30) = **$20**
+- **Total ahorro: ~$186/mes (~60%)**
+
+---
+
+### 📊 Resumen Comparativo
+
+| Aspecto | AWS Academy (Prototipo) | Producción Real |
+|---------|------------------------|-----------------|
+| **Availability** | Single instance, Single AZ | Multi-AZ, ALB, ASG (min 2) |
+| **Scalability** | Manual (1 instancia fija) | Auto Scaling (2-10 instancias) |
+| **Throughput** | 20 req/s | 10,000 req/s |
+| **Latency (P99)** | ~500ms | ~200ms (con caché/DAX) |
+| **Security** | SSH público, HTTP, LabRole | Bastion, HTTPS, IAM granular, WAF |
+| **Monitoring** | Logs básicos | X-Ray, Alarmas, Dashboards |
+| **Cost/mes** | ~$50 | ~$200 (con optimizaciones) |
+| **Recovery Time** | Manual (~10 min) | Automático (~2 min con ASG) |
+
+---
+
+### 🎯 Recomendaciones para Migración a Producción
+
+**Prioridad Alta (Bloqueante para prod):**
+1. ✅ Implementar Application Load Balancer + Auto Scaling Groups
+2. ✅ Eliminar SSH público (usar Bastion o AWS Systems Manager Session Manager)
+3. ✅ Agregar HTTPS end-to-end (ACM certificates)
+4. ✅ Configurar CloudWatch Alarms para errores/latencia
+5. ✅ Implementar Multi-AZ deployment
+
+**Prioridad Media (Performance):**
+6. ✅ Agregar DynamoDB DAX para caché
+7. ✅ Habilitar API Gateway caching
+8. ✅ Configurar Lambda reserved concurrency
+9. ✅ Migrar a DynamoDB provisioned capacity
+
+**Prioridad Baja (Nice to have):**
+10. ✅ Implementar CloudFront CDN
+11. ✅ Agregar AWS WAF rules
+12. ✅ Habilitar AWS X-Ray tracing
+13. ✅ Implementar Spot Instances para dev/staging
+
+---
+
 ## Licencia
 
 MIT
 
 ---
 
-**Última actualización**: Enero 2024
+**Última actualización**: Diciembre 2024
 
 Para preguntas o issues, revisar la documentación de AWS CDK: https://docs.aws.amazon.com/cdk/

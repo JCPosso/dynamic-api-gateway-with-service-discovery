@@ -45,6 +45,15 @@ new Ec2ServiceStack(app, "UsersEc2Stack", {
   gitRepoUrl: repoUrl,
 });
 
+new Ec2ServiceStack(app, "UsersEc2Stack2", {
+  env,
+  serviceName: "users",
+  serviceDirectory: "services/users",
+  servicePort: 3000,
+  dynamoDbTableName: dynamoTableName,
+  gitRepoUrl: repoUrl,
+});
+
 if (!deployOnlyEC2) {
   const router = new LambdaRouterStack(app, "LambdaRouterStack", {
     env,

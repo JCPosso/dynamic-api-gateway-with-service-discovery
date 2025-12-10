@@ -1,5 +1,7 @@
-const AWS = require("aws-sdk");
+const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
+const { DynamoDBDocumentClient, PutCommand } = require("@aws-sdk/lib-dynamodb");
 const os = require("os");
+const http = require("http");
 
 async function getPublicIp() {
   try {
@@ -19,6 +21,44 @@ async function getPublicIp() {
   }
 }
 
+async function getInstanceId() {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: "169.254.169.254",
+      path: "/latest/meta-data/instance-id",
+      timeout: 2000,
+    };
+
+    const req = http.get(options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => (data += chunk));
+      res.on("end", () => {
+        if (res.statusCode === 200) {
+          resolve(data.trim());
+        } else {
+          // Fallback: generar ID único basado en hostname e IP
+          const fallbackId = `${os.hostname()}-${Date.now()}`;
+          console.warn(`Failed to get EC2 instance ID, using fallback: ${fallbackId}`);
+          resolve(fallbackId);
+        }
+      });
+    });
+
+    req.on("error", (err) => {
+      const fallbackId = `${os.hostname()}-${Date.now()}`;
+      console.warn(`Error getting instance ID: ${err.message}, using fallback: ${fallbackId}`);
+      resolve(fallbackId);
+    });
+
+    req.on("timeout", () => {
+      req.destroy();
+      const fallbackId = `${os.hostname()}-${Date.now()}`;
+      console.warn(`Timeout getting instance ID, using fallback: ${fallbackId}`);
+      resolve(fallbackId);
+    });
+  });
+}
+
 async function registerIp(serviceName, tableName) {
   console.log(
     `[registerIp] Starting registration for ${serviceName}, tableName: ${tableName}`
@@ -33,24 +73,32 @@ async function registerIp(serviceName, tableName) {
     }
 
     console.log(
-      `[registerIp] Getting public IP for service: ${serviceName}`
+      `[registerIp] Getting instance ID and IP for service: ${serviceName}`
     );
+    
+    const instanceId = await getInstanceId();
     const ip = await getPublicIp();
+    const port = parseInt(process.env.PORT || "3000");
+
     console.log(
-      `[registerIp] Obtained IP: ${ip} for service: ${serviceName}`
+      `[registerIp] Instance: ${instanceId}, IP: ${ip}, Port: ${port}`
     );
 
-    const dynamodb = new AWS.DynamoDB.DocumentClient({
+    const client = new DynamoDBClient({
       region: process.env.AWS_DEFAULT_REGION || "us-east-1",
     });
+    const dynamodb = DynamoDBDocumentClient.from(client);
 
     const params = {
       TableName: tableName,
       Item: {
-        serviceName,
-        ip,
-        timestamp: Date.now(),
-        port: process.env.PORT || 3000,
+        serviceName,           // Partition key
+        instanceId,            // Sort key (soporte para múltiples instancias)
+        host: ip,              // IP del servicio
+        port: port,            // Puerto del servicio
+        weight: 1,             // Peso para weighted round robin (futuro)
+        timestamp: new Date().toISOString(),
+        ttl: Math.floor(Date.now() / 1000) + 86400, // 24 horas
       },
     };
 
@@ -58,9 +106,9 @@ async function registerIp(serviceName, tableName) {
       `[registerIp] Putting item to DynamoDB:`,
       JSON.stringify(params, null, 2)
     );
-    await dynamodb.put(params).promise();
+    await dynamodb.send(new PutCommand(params));
     console.log(
-      `✓ Service '${serviceName}' successfully registered in DynamoDB with IP: ${ip}:${process.env.PORT}`
+      `✓ Service '${serviceName}' (${instanceId}) successfully registered with IP: ${ip}:${port}`
     );
   } catch (err) {
     console.error(
