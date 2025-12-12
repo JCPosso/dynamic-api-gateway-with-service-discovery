@@ -12,9 +12,10 @@ set -e
 # Configuration
 API_URL="${API_URL:-}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
+AB_OPTS="${AB_OPTS:--l}"  # -l desactiva fallos por longitud variable de respuesta
 
 if [ -z "$API_URL" ]; then
-  echo "❌ ERROR: API_URL no está configurada"
+  echo "ERROR: API_URL no está configurada"
   echo "Uso: API_URL='https://xxx.execute-api.us-east-1.amazonaws.com/dev' ./stress-test.sh"
   exit 1
 fi
@@ -56,9 +57,9 @@ response_ms=$(echo "$response_time * 1000" | bc | cut -d. -f1)
 echo -e "Latencia base: ${GREEN}${response_ms}ms${NC}"
 
 if (( $(echo "$response_time < 2.0" | bc -l) )); then
-  echo -e "${GREEN}✅ PASS: Latencia aceptable${NC}"
+  echo -e "${GREEN}PASS: Latencia aceptable${NC}"
 else
-  echo -e "${YELLOW}⚠️  WARN: Latencia alta (esperado < 2000ms)${NC}"
+  echo -e "${YELLOW}WARN: Latencia alta (esperado < 2000ms)${NC}"
 fi
 
 ##############################################################################
@@ -68,7 +69,7 @@ fi
 echo -e "\n${BLUE}=== Test 2: Carga Baja (50 requests, 5 concurrent) ===${NC}"
 echo "Objetivo: Validar comportamiento con carga ligera"
 
-ab -n 50 -c 5 -q -g test2.tsv "$API_URL/users/health" > test2.log 2>&1
+ab $AB_OPTS -n 50 -c 5 -q -g test2.tsv "$API_URL/users/health" > test2.log 2>&1
 
 # Parse results
 requests=$(grep "Complete requests:" test2.log | awk '{print $3}')
@@ -82,9 +83,9 @@ echo "  Throughput: ${rps} req/s"
 echo "  Latencia promedio: ${mean_time}ms"
 
 if [ "$failed" -eq 0 ]; then
-  echo -e "${GREEN}✅ PASS: 0 errores${NC}"
+  echo -e "${GREEN}PASS: 0 errores${NC}"
 else
-  echo -e "${RED}❌ FAIL: $failed requests fallidos${NC}"
+  echo -e "${RED}FAIL: $failed requests fallidos${NC}"
 fi
 
 ##############################################################################
@@ -94,7 +95,7 @@ fi
 echo -e "\n${BLUE}=== Test 3: Carga Media (100 requests, 10 concurrent) ===${NC}"
 echo "Objetivo: Verificar throttling de API Gateway (20 req/s configurado)"
 
-ab -n 100 -c 10 -q -g test3.tsv "$API_URL/users/list" > test3.log 2>&1
+ab $AB_OPTS -n 100 -c 10 -q -g test3.tsv "$API_URL/users/list" > test3.log 2>&1
 
 requests=$(grep "Complete requests:" test3.log | awk '{print $3}')
 failed=$(grep "Failed requests:" test3.log | awk '{print $3}')
@@ -126,11 +127,11 @@ echo -e "\n${BLUE}=== Test 4: Multi-service Routing (50 requests cada uno) ===${
 echo "Objetivo: Validar routing dinámico a users y orders"
 
 # Users service
-ab -n 50 -c 5 -q "$API_URL/users/list" > test4a.log 2>&1
+ab $AB_OPTS -n 50 -c 5 -q "$API_URL/users/list" > test4a.log 2>&1
 users_failed=$(grep "Failed requests:" test4a.log | awk '{print $3}')
 
 # Orders service
-ab -n 50 -c 5 -q "$API_URL/orders/orders" > test4b.log 2>&1
+ab $AB_OPTS -n 50 -c 5 -q "$API_URL/orders/orders" > test4b.log 2>&1
 orders_failed=$(grep "Failed requests:" test4b.log | awk '{print $3}')
 
 echo "  Users service - Fallidos: $users_failed"
@@ -149,7 +150,7 @@ fi
 echo -e "\n${BLUE}=== Test 5: Sustained Load (200 requests, 5 concurrent) ===${NC}"
 echo "Objetivo: Validar estabilidad bajo carga sostenida"
 
-ab -n 200 -c 5 -q -t 30 -g test5.tsv "$API_URL/users/health" > test5.log 2>&1
+ab $AB_OPTS -n 200 -c 5 -q -t 30 -g test5.tsv "$API_URL/users/health" > test5.log 2>&1
 
 requests=$(grep "Complete requests:" test5.log | awk '{print $3}')
 failed=$(grep "Failed requests:" test5.log | awk '{print $3}')
@@ -175,8 +176,8 @@ echo -e "\n${BLUE}=== Test 6: Service Discovery Performance ===${NC}"
 echo "Objetivo: Medir impacto de consultas a DynamoDB"
 
 # Forzar lookup de servicio nuevo (primero users, luego orders)
-ab -n 20 -c 1 -q "$API_URL/users/health" > test6a.log 2>&1
-ab -n 20 -c 1 -q "$API_URL/orders/orders" > test6b.log 2>&1
+ab $AB_OPTS -n 20 -c 1 -q "$API_URL/users/health" > test6a.log 2>&1
+ab $AB_OPTS -n 20 -c 1 -q "$API_URL/orders/orders" > test6b.log 2>&1
 
 users_mean=$(grep "Time per request:" test6a.log | head -1 | awk '{print $4}')
 orders_mean=$(grep "Time per request:" test6b.log | head -1 | awk '{print $4}')
@@ -273,7 +274,11 @@ Atributos de Calidad Validados:
 EOF
 
 # Cleanup
-rm -f test*.log test*.tsv
+if [ -z "$KEEP_LOGS" ]; then
+  rm -f test*.log test*.tsv
+else
+  echo -e "${YELLOW}KEEP_LOGS activo: conservando test*.log y test*.tsv${NC}"
+fi
 
 echo -e "${GREEN}Stress tests completados${NC}"
 echo -e "Archivos de resultados eliminados (test*.log, test*.tsv)\n"

@@ -96,7 +96,6 @@ async function registerIp(serviceName, tableName) {
         instanceId,            // Sort key (soporte para múltiples instancias)
         host: ip,              // IP del servicio
         port: port,            // Puerto del servicio
-        weight: 1,             // Peso para weighted round robin (futuro)
         timestamp: new Date().toISOString(),
         ttl: Math.floor(Date.now() / 1000) + 86400, // 24 horas
       },

@@ -2,7 +2,7 @@
 
 **Prototipo funcional de un API Gateway con descubrimiento dinámico de servicios en AWS**
 
-## 📋 Tabla de Contenidos
+## Tabla de Contenidos
 
 1. [Desafío Técnico](#desafío-técnico)
 2. [Arquitectura](#arquitectura)
@@ -310,7 +310,7 @@ Ejemplo:
 ```bash
 API_URL="https://<api-id>.execute-api.us-east-1.amazonaws.com/dev" \
 # requerido para pruebas de API
-DYNAMODB_TABLE="<tabla ServiceRegistry>" \  # opcional
+DYNAMODB_TABLE="<tabla ServiceRegistry>" \
 ./test.sh
 ```
 

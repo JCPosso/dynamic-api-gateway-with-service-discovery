@@ -65,7 +65,6 @@ async function getAllInstances(serviceName) {
     instanceId: item.instanceId,
     host: item.host || item.ip, // Soportar ambos nombres
     port: item.port || 3000,
-    weight: item.weight || 1,
     metadata: item.metadata || {},
   }));
 }
