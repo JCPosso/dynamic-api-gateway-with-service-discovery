@@ -37,7 +37,7 @@ if [ -z "$DYNAMODB_TABLE" ]; then
     echo "   ./test.sh"
     exit 1
   fi
-  echo "✅ Auto-detected DYNAMODB_TABLE: $DYNAMODB_TABLE"
+  echo "Auto-detected DYNAMODB_TABLE: $DYNAMODB_TABLE"
 fi
 
 # Optional skips for constrained environments
@@ -82,17 +82,17 @@ print_test() {
 }
 
 print_pass() {
-  echo -e "${GREEN}✅ PASS: $1${NC}"
+  echo -e "${GREEN}PASS: $1${NC}"
   ((PASSED++))
 }
 
 print_fail() {
-  echo -e "${RED}❌ FAIL: $1${NC}"
+  echo -e "${RED}FAIL: $1${NC}"
   ((FAILED++))
 }
 
 print_skip() {
-  echo -e "${YELLOW}⏭️  SKIP: $1${NC}"
+  echo -e "${YELLOW} SKIP: $1${NC}"
   ((SKIPPED++))
 }
 

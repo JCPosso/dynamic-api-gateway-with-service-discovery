@@ -2,7 +2,6 @@
 
 ##############################################################################
 # Stress Test Script for API Gateway Auto-Discovery
-# Compatible con AWS Academy (límites conservadores)
 #
 # Herramientas: Apache Bench (ab) - viene con macOS
 # Uso: API_URL="https://xxx.execute-api.us-east-1.amazonaws.com/dev" ./stress-test.sh
@@ -29,7 +28,7 @@ NC='\033[0m'
 
 echo -e "${BLUE}"
 echo "╔═══════════════════════════════════════════════════════════════════╗"
-echo "║        API Gateway Stress Tests (AWS Academy Compatible)         ║"
+echo "║        API Gateway Stress Tests                                   ║"
 echo "╚═══════════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
@@ -114,9 +113,9 @@ echo "  Latencia promedio: ${mean_time}ms"
 echo "  P50: ${p50}ms | P95: ${p95}ms | P99: ${p99}ms"
 
 if (( $(echo "$rps > 15" | bc -l) )); then
-  echo -e "${GREEN}✅ PASS: Throughput adecuado${NC}"
+  echo -e "${GREEN}PASS: Throughput adecuado${NC}"
 else
-  echo -e "${YELLOW}⚠️  WARN: Throughput bajo${NC}"
+  echo -e "${YELLOW}WARN: Throughput bajo${NC}"
 fi
 
 ##############################################################################
@@ -138,9 +137,9 @@ echo "  Users service - Fallidos: $users_failed"
 echo "  Orders service - Fallidos: $orders_failed"
 
 if [ "$users_failed" -eq 0 ] && [ "$orders_failed" -eq 0 ]; then
-  echo -e "${GREEN}✅ PASS: Ambos servicios responden correctamente${NC}"
+  echo -e "${GREEN}PASS: Ambos servicios responden correctamente${NC}"
 else
-  echo -e "${RED}❌ FAIL: Errores en routing${NC}"
+  echo -e "${RED}FAIL: Errores en routing${NC}"
 fi
 
 ##############################################################################
@@ -163,9 +162,9 @@ echo "  Throughput promedio: ${rps} req/s"
 echo "  Request más lento: ${longest}ms"
 
 if [ "$failed" -eq 0 ]; then
-  echo -e "${GREEN}✅ PASS: Sistema estable bajo carga sostenida${NC}"
+  echo -e "${GREEN}PASS: Sistema estable bajo carga sostenida${NC}"
 else
-  echo -e "${RED}❌ FAIL: $failed requests fallidos${NC}"
+  echo -e "${RED}FAIL: $failed requests fallidos${NC}"
 fi
 
 ##############################################################################
@@ -186,9 +185,9 @@ echo "  Users lookup latency: ${users_mean}ms"
 echo "  Orders lookup latency: ${orders_mean}ms"
 
 if (( $(echo "$users_mean < 1000 && $orders_mean < 1000" | bc -l) )); then
-  echo -e "${GREEN}✅ PASS: DynamoDB lookup rápido${NC}"
+  echo -e "${GREEN}PASS: DynamoDB lookup rápido${NC}"
 else
-  echo -e "${YELLOW}⚠️  WARN: Latencia de lookup alta${NC}"
+  echo -e "${YELLOW}WARN: Latencia de lookup alta${NC}"
 fi
 
 ##############################################################################
@@ -250,31 +249,31 @@ echo -e "${BLUE}╚════════════════════�
 
 cat <<EOF
 
-📊 Resultados:
-  ✓ Baseline latency: ${response_ms}ms
-  ✓ Throughput máximo: ${rps} req/s
-  ✓ Latencia promedio (carga media): ${mean_time}ms
-  ✓ P95 latency: ${p95}ms
-  ✓ P99 latency: ${p99}ms
-  ✓ Total requests procesados: $((50 + 100 + 200))
-  ✓ Errores totales: $((failed + users_failed + orders_failed))
+Resultados:
+  Baseline latency: ${response_ms}ms
+  Throughput máximo: ${rps} req/s
+  Latencia promedio (carga media): ${mean_time}ms
+  P95 latency: ${p95}ms
+  P99 latency: ${p99}ms
+  Total requests procesados: $((50 + 100 + 200))
+  Errores totales: $((failed + users_failed + orders_failed))
 
-📈 Métricas CloudWatch:
-  ✓ Lambda invocations: $invocations
-  ✓ Lambda errors: $errors
-  ✓ Avg Lambda duration: ${duration}ms
+Métricas CloudWatch:
+  Lambda invocations: $invocations
+  Lambda errors: $errors
+  Avg Lambda duration: ${duration}ms
 
-🎯 Atributos de Calidad Validados:
-  ✅ Performance: Latencia < 2s
-  ✅ Scalability: Maneja 20 req/s (throttling configurado)
-  ✅ Reliability: ${failed} errores en 200 requests sostenidos
-  ✅ Availability: Servicios responden consistentemente
-  ✅ Interoperability: Routing a múltiples servicios funcional
+Atributos de Calidad Validados:
+  Performance: Latencia < 2s
+  Scalability: Maneja 20 req/s (throttling configurado)
+  Reliability: ${failed} errores en 200 requests sostenidos
+  Availability: Servicios responden consistentemente
+  Interoperability: Routing a múltiples servicios funcional
 
 EOF
 
 # Cleanup
 rm -f test*.log test*.tsv
 
-echo -e "${GREEN}✅ Stress tests completados${NC}"
+echo -e "${GREEN}Stress tests completados${NC}"
 echo -e "Archivos de resultados eliminados (test*.log, test*.tsv)\n"
