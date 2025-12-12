@@ -5,27 +5,15 @@ import { LambdaRouterStack } from "../lib/lambda-router-stack";
 import { Ec2ServiceStack } from "../lib/ec2-service-stack";
 
 const app = new cdk.App();
-
-// Definir el entorno de AWS (necesario para VPC lookup)
 const env = {
-  account: process.env.CDK_DEFAULT_ACCOUNT || "646981656470",
-  region: process.env.CDK_DEFAULT_REGION || "us-east-1",
+  account: process.env.CDK_DEFAULT_ACCOUNT,
+  region: process.env.CDK_DEFAULT_REGION,
 };
-
-// Si estamos haciendo deploy solo de EC2, no crear las otras stacks
 const deployOnlyEC2 = process.env.DEPLOY_ONLY_EC2 === "true";
+const dynamo = new DynamoDbStack(app, "ServiceRegistryStack", { env });
+let dynamoTableName = dynamo.serviceRegistry.tableName;
+const repoUrl = process.env.SERVICE_GIT_REPO || "";
 
-let dynamoTableName = "ServiceRegistryStack-ServiceRegistryC10B6608-D2AX099FCN8Y";
-
-if (!deployOnlyEC2) {
-  const dynamo = new DynamoDbStack(app, "ServiceRegistryStack", { env });
-  dynamoTableName = dynamo.serviceRegistry.tableName;
-}
-
-// Repositorio que contiene los servicios Node.js
-const repoUrl =
-  process.env.SERVICE_GIT_REPO ||
-  "https://github.com/JCPosso/dynamic-api-gateway-with-service-discovery.git";
 
 new Ec2ServiceStack(app, "OrdersEc2Stack", {
   env,
