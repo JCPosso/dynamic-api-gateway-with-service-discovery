@@ -131,7 +131,7 @@ ab $AB_OPTS -n 50 -c 5 -q "$API_URL/users/list" > test4a.log 2>&1
 users_failed=$(grep "Failed requests:" test4a.log | awk '{print $3}')
 
 # Orders service
-ab $AB_OPTS -n 50 -c 5 -q "$API_URL/orders/orders" > test4b.log 2>&1
+ab $AB_OPTS -n 50 -c 5 -q "$API_URL/orders/list" > test4b.log 2>&1
 orders_failed=$(grep "Failed requests:" test4b.log | awk '{print $3}')
 
 echo "  Users service - Fallidos: $users_failed"
@@ -177,7 +177,7 @@ echo "Objetivo: Medir impacto de consultas a DynamoDB"
 
 # Forzar lookup de servicio nuevo (primero users, luego orders)
 ab $AB_OPTS -n 20 -c 1 -q "$API_URL/users/health" > test6a.log 2>&1
-ab $AB_OPTS -n 20 -c 1 -q "$API_URL/orders/orders" > test6b.log 2>&1
+ab $AB_OPTS -n 20 -c 1 -q "$API_URL/orders/list" > test6b.log 2>&1
 
 users_mean=$(grep "Time per request:" test6a.log | head -1 | awk '{print $4}')
 orders_mean=$(grep "Time per request:" test6b.log | head -1 | awk '{print $4}')

@@ -204,7 +204,7 @@ curl -i "$API_URL/users/health"
 # Esperado: 200 OK, JSON response
 
 # Probar orders service
-curl -i "$API_URL/orders/orders"
+curl -i "$API_URL/orders/list"
 # Esperado: 200 OK, JSON response
 ```
 
@@ -252,8 +252,8 @@ curl -w "\nHTTP Status: %{http_code}\n" "$API_URL/users/health"
 curl -w "\nHTTP Status: %{http_code}\n" "$API_URL/users/list"
 # Esperado: 200, array de usuarios
 
-# Test 3: GET /orders/orders
-curl -w "\nHTTP Status: %{http_code}\n" "$API_URL/orders/orders"
+# Test 3: GET /orders/list
+curl -w "\nHTTP Status: %{http_code}\n" "$API_URL/orders/list"
 # Esperado: 200, array de órdenes
 ```
 
@@ -322,7 +322,7 @@ chmod +x test.sh
 | **Descubrimiento** | Servicios en DynamoDB | `aws dynamodb scan --table-name <tabla ServiceRegistry>` | 2 items |
 | **Health Check** | Endpoint de usuarios | `curl /dev/users/health` | 200 OK |
 | **List Users** | Obtener usuarios | `curl /dev/users/list` | 200 OK + JSON |
-| **List Orders** | Obtener órdenes | `curl /dev/orders/orders` | 200 OK + JSON |
+| **List Orders** | Obtener órdenes | `curl /dev/orders/list` | 200 OK + JSON |
 | **Error 404** | Servicio inexistente | `curl /dev/unknown/path` | 404 |
 
 ---

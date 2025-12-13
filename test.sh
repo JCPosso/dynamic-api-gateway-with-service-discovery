@@ -171,7 +171,7 @@ test_routing() {
   
   test_endpoint "Users Health Check" "/users/health" "200"
   test_endpoint "Users List" "/users/list" "200"
-  test_endpoint "Orders List" "/orders/orders" "200"
+  test_endpoint "Orders List" "/orders/list" "200"
 }
 
 ##############################################################################
