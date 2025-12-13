@@ -277,7 +277,7 @@ test_performance() {
   if [ -n "$response_time" ]; then
     # Convert to milliseconds
     response_ms=$(echo "$response_time * 1000" | bc | cut -d. -f1)
-    echo "Response time: ${BLUE}${response_ms}ms${NC}"
+    echo "Response time: ${response_ms}ms"
     
     # AWS Academy baseline: expect < 5s for single requests (generous)
     if (( $(echo "$response_time < 5.0" | bc -l) )); then
@@ -320,7 +320,7 @@ print_summary() {
 main() {
   echo -e "${BLUE}"
   echo "╔════════════════════════════════════════════════════════════════╗"
-  echo "║  API Gateway Auto-Discovery Test Suite (AWS Academy)          ║"
+  echo "║         API Gateway Auto-Discovery Tests                       ║"
   echo "╚════════════════════════════════════════════════════════════════╝"
   echo -e "${NC}"
   
