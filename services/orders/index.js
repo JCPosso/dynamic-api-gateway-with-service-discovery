@@ -16,8 +16,8 @@ app.get("/", (req, res) => {
 });
 
 // GET ALL
-app.get("/orders", (req, res) => {
-  res.json(orders);
+app.get("/list", (req, res) => {
+  res.json({ orders: orders });
 });
 
 // GET BY ID
