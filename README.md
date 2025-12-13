@@ -300,11 +300,6 @@ aws cloudwatch get-metric-statistics \
 ### Script de Pruebas Automatizadas
 
 Ejecutar el script `test.sh`:
-
-- `SKIP_LOGS=true` omite verificación de CloudWatch
-- `SKIP_PERF=true` omite medición de latencia
-- `SKIP_API=true` omite pruebas que requieren API Gateway
-
 Ejemplo:
 
 ```bash
@@ -329,7 +324,6 @@ chmod +x test.sh
 | **List Users** | Obtener usuarios | `curl /dev/users/list` | 200 OK + JSON |
 | **List Orders** | Obtener órdenes | `curl /dev/orders/orders` | 200 OK + JSON |
 | **Error 404** | Servicio inexistente | `curl /dev/unknown/path` | 404 |
-| **Logs Lambda** | Verificar router logs | `aws logs tail /aws/lambda/lambda-router` | Invocaciones visibles |
 
 ---
 ### Stress Tests

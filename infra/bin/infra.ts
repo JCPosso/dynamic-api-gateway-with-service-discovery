@@ -9,11 +9,19 @@ const env = {
   account: process.env.CDK_DEFAULT_ACCOUNT,
   region: process.env.CDK_DEFAULT_REGION,
 };
-const deployOnlyEC2 = process.env.DEPLOY_ONLY_EC2 === "true";
 const dynamo = new DynamoDbStack(app, "ServiceRegistryStack", { env });
 let dynamoTableName = dynamo.serviceRegistry.tableName;
-const repoUrl = process.env.SERVICE_GIT_REPO || "";
+const repoUrl = process.env.SERVICE_GIT_REPO;
 
+const router = new LambdaRouterStack(app, "LambdaRouterStack", {
+  env,
+  serviceRegistryTableName: dynamoTableName,
+});
+
+new ApiGatewayStack(app, "ApiGatewayStack", {
+  env,
+  routerLambda: router.routerLambda,
+});
 
 new Ec2ServiceStack(app, "OrdersEc2Stack", {
   env,
@@ -21,7 +29,7 @@ new Ec2ServiceStack(app, "OrdersEc2Stack", {
   serviceDirectory: "services/orders",
   servicePort: 3001,
   dynamoDbTableName: dynamoTableName,
-  gitRepoUrl: repoUrl,
+  gitRepoUrl: repoUrl!,
 });
 
 new Ec2ServiceStack(app, "UsersEc2Stack", {
@@ -30,7 +38,7 @@ new Ec2ServiceStack(app, "UsersEc2Stack", {
   serviceDirectory: "services/users",
   servicePort: 3000,
   dynamoDbTableName: dynamoTableName,
-  gitRepoUrl: repoUrl,
+  gitRepoUrl: repoUrl!,
 });
 
 new Ec2ServiceStack(app, "UsersEc2Stack2", {
@@ -39,18 +47,5 @@ new Ec2ServiceStack(app, "UsersEc2Stack2", {
   serviceDirectory: "services/users",
   servicePort: 3000,
   dynamoDbTableName: dynamoTableName,
-  gitRepoUrl: repoUrl,
+  gitRepoUrl: repoUrl!,
 });
-
-if (!deployOnlyEC2) {
-  const router = new LambdaRouterStack(app, "LambdaRouterStack", {
-    env,
-    serviceRegistryTableName: dynamoTableName,
-  });
-
-  new ApiGatewayStack(app, "ApiGatewayStack", {
-    env,
-    routerLambda: router.routerLambda,
-  });
-}
-

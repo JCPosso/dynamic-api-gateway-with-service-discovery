@@ -39,7 +39,7 @@ echo ""
 
 # Check dependencies
 if ! command -v ab >/dev/null 2>&1; then
-  echo -e "${RED}❌ Apache Bench (ab) no está instalado${NC}"
+  echo -e "${RED}Apache Bench (ab) no está instalado${NC}"
   echo "Instalar con: brew install httpd (macOS)"
   exit 1
 fi
